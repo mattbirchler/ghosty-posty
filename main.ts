@@ -5,6 +5,13 @@ interface GhostyPostySettings {
     apiKey: string;
 }
 
+interface FrontMatterData {
+    tags?: string[];
+    status?: 'draft' | 'published';
+    time?: string;
+    title?: string;
+}
+
 const DEFAULT_SETTINGS: GhostyPostySettings = {
     ghostUrl: '',
     apiKey: ''
@@ -21,7 +28,7 @@ export default class GhostyPostyPlugin extends Plugin {
         // Add a command to publish the current note as a draft
         this.addCommand({
             id: 'publish-note-as-draft',
-            name: 'Publish current note as a draft',
+            name: 'Publish current note as a draft or post',
             checkCallback: (checking: boolean) => {
                 // Check if we're in a markdown file
                 const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -43,6 +50,89 @@ export default class GhostyPostyPlugin extends Plugin {
         console.log('Loaded Ghosty Posty plugin');
     }
     
+    parseFrontMatter(content: string): { frontMatter: FrontMatterData, markdownContent: string } {
+        console.log('Parsing frontmatter from note');
+        
+        // Default values
+        const frontMatter: FrontMatterData = {
+            status: 'draft',
+            tags: []
+        };
+        
+        // Check if the content has frontmatter (starts with ---)
+        if (!content.startsWith('---')) {
+            console.log('No frontmatter found, using entire content');
+            return { frontMatter, markdownContent: content };
+        }
+        
+        // Find the end of the frontmatter
+        const secondDivider = content.indexOf('---', 3);
+        if (secondDivider === -1) {
+            console.log('No closing frontmatter delimiter found');
+            return { frontMatter, markdownContent: content };
+        }
+        
+        // Extract the frontmatter and the remaining content
+        const frontMatterText = content.substring(3, secondDivider).trim();
+        const markdownContent = content.substring(secondDivider + 3).trim();
+        
+        console.log('Found frontmatter:', frontMatterText);
+        
+        // Parse frontmatter content
+        const lines = frontMatterText.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // Skip empty lines
+            if (!line) continue;
+            
+            // Parse key-value pairs
+            if (line.includes(':')) {
+                const [key, value] = line.split(':', 2).map(s => s.trim());
+                
+                switch (key.toLowerCase()) {
+                    case 'title':
+                        frontMatter.title = value;
+                        break;
+                    case 'status':
+                        frontMatter.status = value === 'post' || value === 'published' ? 'published' : 'draft';
+                        break;
+                    case 'time':
+                        frontMatter.time = value;
+                        break;
+                    case 'tags':
+                        // For tags, we need to handle the list format
+                        const tagList: string[] = [];
+                        
+                        // If inline format: tags: tag1, tag2
+                        if (value) {
+                            value.split(',').forEach(tag => {
+                                const trimmedTag = tag.trim();
+                                if (trimmedTag) tagList.push(trimmedTag);
+                            });
+                        } 
+                        // If it's a list format: look for indented lines with "- "
+                        else {
+                            let j = i + 1;
+                            while (j < lines.length && lines[j].trim().startsWith('-')) {
+                                const tag = lines[j].trim().substring(1).trim();
+                                if (tag) tagList.push(tag);
+                                j++;
+                            }
+                        }
+                        
+                        frontMatter.tags = tagList;
+                        break;
+                }
+            }
+        }
+        
+        console.log('Parsed frontmatter:', frontMatter);
+        console.log('Content length:', markdownContent.length);
+        
+        return { frontMatter, markdownContent };
+    }
+    
     async publishCurrentNote(view: MarkdownView) {
         try {
             // Get the current note content and metadata
@@ -50,18 +140,27 @@ export default class GhostyPostyPlugin extends Plugin {
             const content = editor.getValue();
             const fileName = view.file?.basename || 'Untitled Note';
             
+            // Parse frontmatter
+            const { frontMatter, markdownContent } = this.parseFrontMatter(content);
+            
+            // Use frontmatter title if available, otherwise use filename
+            const title = frontMatter.title || fileName;
+            
+            // Determine post status
+            const postStatus = frontMatter.status || 'draft';
+            
             // Create a placeholder notice while we publish
-            const statusNotice = new Notice('Publishing to Ghost as draft...', 0);
+            const statusNotice = new Notice(`Publishing to Ghost as ${postStatus}...`, 0);
             
             // Call the publish function
-            const result = await this.publishToGhost(fileName, content);
+            const result = await this.publishToGhost(title, markdownContent, frontMatter);
             
             // Remove the placeholder notice
             statusNotice.hide();
             
             // Show success or error message
             if (result.success) {
-                new Notice(`Successfully published "${fileName}" as a draft`);
+                new Notice(`Successfully published "${title}" as ${postStatus}`);
             } else {
                 new Notice(`Failed to publish: ${result.error}`);
             }
@@ -145,7 +244,7 @@ export default class GhostyPostyPlugin extends Plugin {
         }
     }
     
-    async publishToGhost(title: string, markdownContent: string): Promise<{ success: boolean, error?: string, postUrl?: string }> {
+    async publishToGhost(title: string, markdownContent: string, frontMatter: FrontMatterData): Promise<{ success: boolean, error?: string, postUrl?: string }> {
         try {
             const { ghostUrl, apiKey } = this.settings;
             
@@ -181,10 +280,10 @@ export default class GhostyPostyPlugin extends Plugin {
             console.log('Markdown length:', cleanMarkdown.length);
             
             // Prepare the post data
-            const postData = {
+            const postData: any = {
                 posts: [{
                     title: title,
-                    markdown: markdownContent,
+                    markdown: cleanMarkdown,
                     // Add mobiledoc format for Ghost v4+
                     mobiledoc: JSON.stringify({
                         version: "0.3.1",
@@ -192,20 +291,34 @@ export default class GhostyPostyPlugin extends Plugin {
                         atoms: [],
                         cards: [
                             ["markdown", {
-                                markdown: markdownContent
+                                markdown: cleanMarkdown
                             }]
                         ],
                         sections: [[10, 0]]
                     }),
-                    status: 'draft' // Publish as draft
+                    status: frontMatter.status || 'draft'
                 }]
             };
+            
+            // Add tags if present
+            if (frontMatter.tags && frontMatter.tags.length > 0) {
+                postData.posts[0].tags = frontMatter.tags.map(tag => ({ name: tag }));
+                console.log('Adding tags:', postData.posts[0].tags);
+            }
+            
+            // Add scheduled time if present and status is 'published'
+            if (frontMatter.time && frontMatter.status === 'published') {
+                postData.posts[0].published_at = frontMatter.time;
+                console.log('Scheduling post for:', frontMatter.time);
+            }
             
             console.log('Post data sample:', JSON.stringify({
                 posts: [{
                     title: title,
                     markdown: cleanMarkdown.substring(0, 100) + '...',
-                    status: 'draft'
+                    status: frontMatter.status || 'draft',
+                    tags: postData.posts[0].tags || [],
+                    published_at: postData.posts[0].published_at || null
                 }]
             }));
             
