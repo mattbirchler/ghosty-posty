@@ -1,0 +1,10 @@
+{
+	"id": "ghosty-posty",
+	"name": "Ghosty Posty",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Publish Obsidian notes to Ghost blogs",
+	"author": "",
+	"authorUrl": "",
+	"isDesktopOnly": false
+} 
