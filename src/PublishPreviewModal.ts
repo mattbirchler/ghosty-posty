@@ -3,6 +3,7 @@ import { App, Modal, Setting, MarkdownRenderer, Component } from 'obsidian';
 export interface PublishOptions {
     status: 'draft' | 'published';
     tags: string[];
+    featured: boolean;
 }
 
 export class PublishPreviewModal extends Modal {
@@ -45,6 +46,16 @@ export class PublishPreviewModal extends Modal {
                 .setValue(this.currentOptions.status)
                 .onChange(value => {
                     this.currentOptions.status = value as 'draft' | 'published';
+                }));
+
+        // Featured post toggle
+        new Setting(contentEl)
+            .setName('Featured Post')
+            .setDesc('Mark this post as featured on your Ghost site')
+            .addToggle(toggle => toggle
+                .setValue(this.currentOptions.featured)
+                .onChange(value => {
+                    this.currentOptions.featured = value;
                 }));
 
         // Tags input

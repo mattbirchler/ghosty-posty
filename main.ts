@@ -15,6 +15,7 @@ interface FrontMatterData {
     status?: 'draft' | 'published';
     time?: string;
     title?: string;
+    featured?: boolean;
 }
 
 const DEFAULT_SETTINGS: GhostyPostySettings = {
@@ -86,7 +87,8 @@ export default class GhostyPostyPlugin extends Plugin {
         // Default values
         const frontMatter: FrontMatterData = {
             status: 'draft',
-            tags: []
+            tags: [],
+            featured: false
         };
         
         // Check if the content has frontmatter (starts with ---)
@@ -130,6 +132,9 @@ export default class GhostyPostyPlugin extends Plugin {
                     case 'time':
                         frontMatter.time = value;
                         break;
+                    case 'featured':
+                        frontMatter.featured = value.toLowerCase() === 'true';
+                        break;
                     case 'tags':
                         // For tags, we need to handle the list format
                         const tagList: string[] = [];
@@ -156,9 +161,6 @@ export default class GhostyPostyPlugin extends Plugin {
                 }
             }
         }
-        
-        console.log('Parsed frontmatter:', frontMatter);
-        console.log('Content length:', markdownContent.length);
         
         return { frontMatter, markdownContent };
     }
@@ -521,7 +523,8 @@ export default class GhostyPostyPlugin extends Plugin {
             // Create initial options from frontmatter or defaults
             const initialOptions: PublishOptions = {
                 status: frontMatter.status || 'draft',
-                tags: frontMatter.tags || []
+                tags: frontMatter.tags || [],
+                featured: frontMatter.featured || false
             };
             
             // Show the preview modal
@@ -541,7 +544,8 @@ export default class GhostyPostyPlugin extends Plugin {
                         {
                             ...frontMatter,
                             status: options.status,
-                            tags: options.tags
+                            tags: options.tags,
+                            featured: options.featured
                         }
                     );
                     
@@ -902,7 +906,8 @@ export default class GhostyPostyPlugin extends Plugin {
                 posts: [{
                     title: title,
                     lexical: lexical,
-                    status: frontMatter.status || 'draft'
+                    status: frontMatter.status || 'draft',
+                    featured: frontMatter.featured || false
                 }]
             };
             
