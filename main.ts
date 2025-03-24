@@ -1,4 +1,5 @@
 import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile } from 'obsidian';
+import { PublishPreviewModal, PublishOptions } from './src/PublishPreviewModal';
 
 interface GhostyPostySettings {
     ghostUrl: string;
@@ -480,33 +481,56 @@ export default class GhostyPostyPlugin extends Plugin {
             // Parse frontmatter
             const { frontMatter, markdownContent } = this.parseFrontMatter(content);
             
-            // Create a placeholder notice while we publish
-            const statusNotice = new Notice(`Processing images and publishing...`, 0);
+            // Create a placeholder notice while we process images
+            const statusNotice = new Notice(`Processing images...`, 0);
             
             // Process and upload images
             const processedContent = await this.processImageLinks(markdownContent, view);
             
-            // Use frontmatter title if available, otherwise use filename
-            const title = frontMatter.title || fileName;
-            
-            // Determine post status
-            const postStatus = frontMatter.status || 'draft';
-            
-            // Update notice
-            statusNotice.setMessage(`Publishing to Ghost as ${postStatus}...`);
-            
-            // Call the publish function
-            const result = await this.publishToGhost(title, processedContent, frontMatter);
-            
             // Remove the placeholder notice
             statusNotice.hide();
             
-            // Show success or error message
-            if (result.success) {
-                new Notice(`Successfully published "${title}" as ${postStatus}`);
-            } else {
-                new Notice(`Failed to publish: ${result.error}`);
-            }
+            // Use frontmatter title if available, otherwise use filename
+            const title = frontMatter.title || fileName;
+            
+            // Create initial options from frontmatter or defaults
+            const initialOptions: PublishOptions = {
+                status: frontMatter.status || 'draft',
+                tags: frontMatter.tags || []
+            };
+            
+            // Show the preview modal
+            new PublishPreviewModal(
+                this.app,
+                title,
+                processedContent,
+                initialOptions,
+                async (options: PublishOptions) => {
+                    // Create a new notice for publishing
+                    const publishNotice = new Notice(`Publishing to Ghost as ${options.status}...`, 0);
+                    
+                    // Call the publish function with the selected options
+                    const result = await this.publishToGhost(
+                        title,
+                        processedContent,
+                        {
+                            ...frontMatter,
+                            status: options.status,
+                            tags: options.tags
+                        }
+                    );
+                    
+                    // Remove the publishing notice
+                    publishNotice.hide();
+                    
+                    // Show success or error message
+                    if (result.success) {
+                        new Notice(`Successfully published "${title}" as ${options.status}`);
+                    } else {
+                        new Notice(`Failed to publish: ${result.error}`);
+                    }
+                }
+            ).open();
         } catch (error) {
             console.error('Error publishing note:', error);
             new Notice(`Error publishing note: ${error}`);
