@@ -1,8 +1,9 @@
-import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, requestUrl } from 'obsidian';
+import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile } from 'obsidian';
 
 interface GhostyPostySettings {
     ghostUrl: string;
     apiKey: string;
+    imagesDirectory: string;
 }
 
 interface FrontMatterData {
@@ -14,7 +15,8 @@ interface FrontMatterData {
 
 const DEFAULT_SETTINGS: GhostyPostySettings = {
     ghostUrl: '',
-    apiKey: ''
+    apiKey: '',
+    imagesDirectory: 'assets/files'
 }
 
 export default class GhostyPostyPlugin extends Plugin {
@@ -133,6 +135,339 @@ export default class GhostyPostyPlugin extends Plugin {
         return { frontMatter, markdownContent };
     }
     
+    convertObsidianImageLinks(content: string): string {
+        // Replace Obsidian image links ![[image.png]] with standard markdown ![](image.png)
+        return content.replace(/!\[\[(.*?)\]\]/g, '![]($1)');
+    }
+    
+    async processImageLinks(content: string, view: MarkdownView): Promise<string> {
+        const imageRegex = /!\[\[(.*?)\]\]/g;
+        const imagePaths: string[] = [];
+        let match;
+        
+        // Find all image links in the content
+        while ((match = imageRegex.exec(content)) !== null) {
+            imagePaths.push(match[1]);
+        }
+        
+        if (imagePaths.length === 0) {
+            // No images to process, return original content
+            return content;
+        }
+        
+        console.log(`Found ${imagePaths.length} images to upload:`, imagePaths);
+        
+        // Process each image and get Ghost URLs
+        const imageMap = new Map<string, string>();
+        
+        for (const imagePath of imagePaths) {
+            try {
+                const ghostUrl = await this.uploadImageToGhost(imagePath, view);
+                if (ghostUrl) {
+                    imageMap.set(imagePath, ghostUrl);
+                }
+            } catch (error) {
+                console.error(`Error uploading image ${imagePath}:`, error);
+                new Notice(`Failed to upload image ${imagePath}: ${error}`);
+            }
+        }
+        
+        // Replace image links with Ghost URLs
+        let processedContent = content;
+        for (const [imagePath, ghostUrl] of imageMap.entries()) {
+            const regex = new RegExp(`!\\[\\[${this.escapeRegExp(imagePath)}\\]\\]`, 'g');
+            processedContent = processedContent.replace(regex, `![](${ghostUrl})`);
+        }
+        
+        return processedContent;
+    }
+    
+    escapeRegExp(string: string): string {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    
+    async uploadImageToGhost(imagePath: string, view: MarkdownView): Promise<string | null> {
+        try {
+            // Get the file from the vault
+            const file = this.app.vault.getAbstractFileByPath(
+                // If path is relative, resolve it relative to the current note
+                this.resolveImagePath(imagePath, view)
+            );
+            
+            if (!file || !(file instanceof TFile)) {
+                console.error(`File not found: ${imagePath}`);
+                new Notice(`Image not found: ${imagePath}`);
+                return null;
+            }
+            
+            // Read the file as ArrayBuffer
+            const fileData = await this.app.vault.readBinary(file);
+            
+            // Upload to Ghost
+            const uploadUrl = await this.uploadFileToGhost(file.name, fileData);
+            if (uploadUrl) {
+                console.log(`Successfully uploaded ${file.name} to Ghost: ${uploadUrl}`);
+                return uploadUrl;
+            } else {
+                console.error(`Failed to upload ${file.name} to Ghost`);
+                return null;
+            }
+        } catch (error) {
+            console.error(`Error uploading image ${imagePath}:`, error);
+            return null;
+        }
+    }
+    
+    resolveImagePath(imagePath: string, view: MarkdownView): string {
+        // First try absolute path
+        if (imagePath.startsWith("/")) {
+            return imagePath;
+        }
+        
+        // Try relative to current note
+        const currentNotePath = view.file?.parent?.path || "";
+        const relativeToNote = `${currentNotePath}/${imagePath}`;
+        
+        // Check if file exists relative to note
+        if (this.app.vault.getAbstractFileByPath(relativeToNote)) {
+            return relativeToNote;
+        }
+        
+        // If not found, try the configured images directory
+        return `${this.settings.imagesDirectory}/${imagePath}`;
+    }
+    
+    async uploadFileToGhost(fileName: string, fileData: ArrayBuffer): Promise<string | null> {
+        try {
+            const { ghostUrl, apiKey } = this.settings;
+            
+            if (!ghostUrl || !apiKey) {
+                new Notice('Ghost URL and API Key are required');
+                return null;
+            }
+            
+            // Clean up the URL
+            const baseUrl = ghostUrl.trim().replace(/\/$/, '');
+            
+            // Extract API credentials
+            const [id, secret] = apiKey.split(':');
+            if (!id || !secret) {
+                new Notice('Invalid API key format');
+                return null;
+            }
+            
+            // Construct the API URL for uploading images
+            const apiUrl = `${baseUrl}/ghost/api/admin/images/upload/`;
+            console.log('Uploading image to:', apiUrl);
+            
+            // Create FormData with the file
+            // Can't use regular FormData in Obsidian, so we need to use a custom boundary
+            const boundary = '----WebKitFormBoundary' + Math.random().toString(16).substring(2);
+            
+            const fileHeader = 
+                `--${boundary}\r\n` +
+                `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+                `Content-Type: ${this.getMimeType(fileName)}\r\n\r\n`;
+            
+            const fileFooter = `\r\n--${boundary}--\r\n`;
+            
+            // Create buffer with file data
+            const headerBuffer = new TextEncoder().encode(fileHeader);
+            const footerBuffer = new TextEncoder().encode(fileFooter);
+            
+            // Combine buffers
+            const combinedBuffer = new Uint8Array(
+                headerBuffer.byteLength + fileData.byteLength + footerBuffer.byteLength
+            );
+            combinedBuffer.set(new Uint8Array(headerBuffer), 0);
+            combinedBuffer.set(new Uint8Array(fileData), headerBuffer.byteLength);
+            combinedBuffer.set(new Uint8Array(footerBuffer), headerBuffer.byteLength + fileData.byteLength);
+            
+            // Generate JWT token for Ghost Admin API
+            const authToken = this.generateGhostAdminToken(id, secret);
+            
+            try {
+                // Using Obsidian's requestUrl for upload
+                const response = await requestUrl({
+                    url: apiUrl,
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                        'Authorization': authToken
+                    },
+                    body: combinedBuffer,
+                    throw: true
+                });
+                
+                if (response.status >= 200 && response.status < 300) {
+                    console.log('Image upload successful:', response.json);
+                    return response.json?.images?.[0]?.url || null;
+                } else {
+                    console.error('API Error during image upload:', response);
+                    return null;
+                }
+            } catch (error) {
+                console.error('Image upload failed, trying Node.js:', error);
+                
+                // Try with Node.js as fallback
+                return await this.uploadFileWithNode(apiUrl, id, secret, fileName, fileData);
+            }
+        } catch (error) {
+            console.error('Image upload error:', error);
+            return null;
+        }
+    }
+    
+    async uploadFileWithNode(url: string, id: string, secret: string, fileName: string, fileData: ArrayBuffer): Promise<string | null> {
+        return new Promise((resolve) => {
+            try {
+                // Try to access Node.js modules in Electron context
+                // @ts-ignore - Accessing global window object
+                const nodeRequire = window.require;
+                
+                if (!nodeRequire) {
+                    console.log('Node require not available for image upload');
+                    return resolve(null);
+                }
+                
+                const https = nodeRequire('https');
+                const crypto = nodeRequire('crypto');
+                const urlObj = new URL(url);
+                
+                console.log('Uploading image via Node.js to bypass CORS');
+                
+                // Create boundary for multipart/form-data
+                const boundary = '----NodeJSFormBoundary' + Math.random().toString(16).substring(2);
+                
+                // Create JWT token using Node.js crypto
+                const now = Math.floor(Date.now() / 1000);
+                const fiveMinutesFromNow = now + 5 * 60;
+                
+                // Create JWT header and payload
+                const header = {
+                    alg: 'HS256',
+                    typ: 'JWT',
+                    kid: id // Key ID
+                };
+                
+                const payload = {
+                    iat: now,
+                    exp: fiveMinutesFromNow,
+                    aud: '/v5/admin/'
+                };
+                
+                // Base64 encode the header and payload
+                const headerBase64 = Buffer.from(JSON.stringify(header)).toString('base64')
+                    .replace(/\+/g, '-')
+                    .replace(/\//g, '_')
+                    .replace(/=+$/g, '');
+                
+                const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64')
+                    .replace(/\+/g, '-')
+                    .replace(/\//g, '_')
+                    .replace(/=+$/g, '');
+                
+                // Create the signature
+                const signatureInput = `${headerBase64}.${payloadBase64}`;
+                const signature = crypto.createHmac('sha256', Buffer.from(secret, 'hex'))
+                    .update(signatureInput)
+                    .digest('base64')
+                    .replace(/\+/g, '-')
+                    .replace(/\//g, '_')
+                    .replace(/=+$/g, '');
+                
+                // Create the complete JWT token
+                const token = `${headerBase64}.${payloadBase64}.${signature}`;
+                
+                // Create multipart form-data
+                const fileHeader = 
+                    `--${boundary}\r\n` +
+                    `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+                    `Content-Type: ${this.getMimeType(fileName)}\r\n\r\n`;
+                
+                const fileFooter = `\r\n--${boundary}--\r\n`;
+                
+                // Create buffer with file data
+                const headerBuffer = Buffer.from(fileHeader);
+                const footerBuffer = Buffer.from(fileFooter);
+                const fileBuffer = Buffer.from(fileData);
+                
+                // Combine buffers
+                const dataBuffer = Buffer.concat([
+                    headerBuffer,
+                    fileBuffer,
+                    footerBuffer
+                ]);
+                
+                const options = {
+                    hostname: urlObj.hostname,
+                    path: urlObj.pathname + urlObj.search,
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                        'Content-Length': dataBuffer.length,
+                        'Authorization': `Ghost ${token}`
+                    }
+                };
+                
+                const req = https.request(options, (res: any) => {
+                    let data = '';
+                    
+                    res.on('data', (chunk: string) => {
+                        data += chunk;
+                    });
+                    
+                    res.on('end', () => {
+                        if (res.statusCode >= 200 && res.statusCode < 300) {
+                            try {
+                                const jsonData = JSON.parse(data);
+                                console.log('Node.js image upload successful:', jsonData);
+                                resolve(jsonData?.images?.[0]?.url || null);
+                            } catch (e) {
+                                console.error('Error parsing JSON from image upload response:', e);
+                                resolve(null);
+                            }
+                        } else {
+                            console.error('API Error from Node.js image upload:', res.statusCode);
+                            console.error('Error response body:', data);
+                            resolve(null);
+                        }
+                    });
+                });
+                
+                req.on('error', (error: Error) => {
+                    console.error('Node.js image upload error:', error);
+                    resolve(null);
+                });
+                
+                // Write data and end request
+                req.write(dataBuffer);
+                req.end();
+                
+            } catch (error) {
+                console.error('Error in Node.js image upload:', error);
+                resolve(null);
+            }
+        });
+    }
+    
+    getMimeType(fileName: string): string {
+        const extension = fileName.split('.').pop()?.toLowerCase();
+        const mimeTypes: {[key: string]: string} = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'webp': 'image/webp',
+            'svg': 'image/svg+xml',
+            'tiff': 'image/tiff',
+            'tif': 'image/tiff',
+            'bmp': 'image/bmp'
+        };
+        
+        return mimeTypes[extension || ''] || 'application/octet-stream';
+    }
+    
     async publishCurrentNote(view: MarkdownView) {
         try {
             // Get the current note content and metadata
@@ -143,17 +478,23 @@ export default class GhostyPostyPlugin extends Plugin {
             // Parse frontmatter
             const { frontMatter, markdownContent } = this.parseFrontMatter(content);
             
+            // Create a placeholder notice while we publish
+            const statusNotice = new Notice(`Processing images and publishing...`, 0);
+            
+            // Process and upload images
+            const processedContent = await this.processImageLinks(markdownContent, view);
+            
             // Use frontmatter title if available, otherwise use filename
             const title = frontMatter.title || fileName;
             
             // Determine post status
             const postStatus = frontMatter.status || 'draft';
             
-            // Create a placeholder notice while we publish
-            const statusNotice = new Notice(`Publishing to Ghost as ${postStatus}...`, 0);
+            // Update notice
+            statusNotice.setMessage(`Publishing to Ghost as ${postStatus}...`);
             
             // Call the publish function
-            const result = await this.publishToGhost(title, markdownContent, frontMatter);
+            const result = await this.publishToGhost(title, processedContent, frontMatter);
             
             // Remove the placeholder notice
             statusNotice.hide();
@@ -593,6 +934,18 @@ class GhostyPostySettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.apiKey)
                 .onChange(async (value) => {
                     this.plugin.settings.apiKey = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Images Directory')
+            .setDesc('Default directory in your vault where images are stored (e.g., assets/files)')
+            .addText(text => text
+                .setPlaceholder('assets/files')
+                .setValue(this.plugin.settings.imagesDirectory)
+                .onChange(async (value) => {
+                    // Remove leading and trailing slashes for consistency
+                    this.plugin.settings.imagesDirectory = value.replace(/^\/+|\/+$/g, '');
                     await this.plugin.saveSettings();
                 }));
 
