@@ -16,6 +16,7 @@ interface FrontMatterData {
     time?: string;
     title?: string;
     featured?: boolean;
+    visibility?: 'public' | 'members' | 'paid';
 }
 
 const DEFAULT_SETTINGS: GhostyPostySettings = {
@@ -88,7 +89,8 @@ export default class GhostyPostyPlugin extends Plugin {
         const frontMatter: FrontMatterData = {
             status: 'draft',
             tags: [],
-            featured: false
+            featured: false,
+            visibility: 'public'
         };
         
         // Check if the content has frontmatter (starts with ---)
@@ -134,6 +136,12 @@ export default class GhostyPostyPlugin extends Plugin {
                         break;
                     case 'featured':
                         frontMatter.featured = value.toLowerCase() === 'true';
+                        break;
+                    case 'visibility':
+                        const visibilityValue = value.toLowerCase();
+                        if (['public', 'members', 'paid'].includes(visibilityValue)) {
+                            frontMatter.visibility = visibilityValue as 'public' | 'members' | 'paid';
+                        }
                         break;
                     case 'tags':
                         // For tags, we need to handle the list format
@@ -524,7 +532,8 @@ export default class GhostyPostyPlugin extends Plugin {
             const initialOptions: PublishOptions = {
                 status: frontMatter.status || 'draft',
                 tags: frontMatter.tags || [],
-                featured: frontMatter.featured || false
+                featured: frontMatter.featured || false,
+                visibility: frontMatter.visibility || 'public'
             };
             
             // Show the preview modal
@@ -545,7 +554,8 @@ export default class GhostyPostyPlugin extends Plugin {
                             ...frontMatter,
                             status: options.status,
                             tags: options.tags,
-                            featured: options.featured
+                            featured: options.featured,
+                            visibility: options.visibility
                         }
                     );
                     
@@ -907,7 +917,8 @@ export default class GhostyPostyPlugin extends Plugin {
                     title: title,
                     lexical: lexical,
                     status: frontMatter.status || 'draft',
-                    featured: frontMatter.featured || false
+                    featured: frontMatter.featured || false,
+                    visibility: frontMatter.visibility || 'public'
                 }]
             };
             

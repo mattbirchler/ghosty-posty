@@ -4,6 +4,7 @@ export interface PublishOptions {
     status: 'draft' | 'published';
     tags: string[];
     featured: boolean;
+    visibility: 'public' | 'members' | 'paid';
 }
 
 export class PublishPreviewModal extends Modal {
@@ -48,10 +49,23 @@ export class PublishPreviewModal extends Modal {
                     this.currentOptions.status = value as 'draft' | 'published';
                 }));
 
+        // Visibility dropdown
+        new Setting(contentEl)
+            .setName('Visibility')
+            .setDesc('Who can see this post')
+            .addDropdown(dropdown => dropdown
+                .addOption('public', 'Everyone')
+                .addOption('members', 'All Members')
+                .addOption('paid', 'Paid Members Only')
+                .setValue(this.currentOptions.visibility)
+                .onChange(value => {
+                    this.currentOptions.visibility = value as 'public' | 'members' | 'paid';
+                }));
+
         // Featured post toggle
         new Setting(contentEl)
             .setName('Featured Post')
-            .setDesc('Mark this post as featured on your Ghost site')
+            .setDesc('Mark this post as featured')
             .addToggle(toggle => toggle
                 .setValue(this.currentOptions.featured)
                 .onChange(value => {
@@ -76,7 +90,7 @@ export class PublishPreviewModal extends Modal {
 
         // Create preview container with max height and scrolling
         const previewContainer = contentEl.createDiv({ cls: 'publish-preview-container' });
-        previewContainer.style.maxHeight = '400px';
+        previewContainer.style.maxHeight = '200px';
         previewContainer.style.overflow = 'auto';
         previewContainer.style.padding = '10px';
         previewContainer.style.border = '1px solid var(--background-modifier-border)';
