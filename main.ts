@@ -827,8 +827,23 @@ export default class GhostyPostyPlugin extends Plugin {
             // Clean up the markdown content
             const cleanMarkdown = markdownContent.trim();
             
+            // Check if first line is an image
+            const lines = cleanMarkdown.split('\n');
+            let featuredImage: string | undefined;
+            let contentWithoutFirstImage = cleanMarkdown;
+            
+            if (lines.length > 0) {
+                const firstLine = lines[0].trim();
+                const imageMatch = firstLine.match(/^!\[.*?\]\((.*?)\)$/);
+                if (imageMatch) {
+                    featuredImage = imageMatch[1];
+                    // Remove the first image from content
+                    contentWithoutFirstImage = lines.slice(1).join('\n').trim();
+                }
+            }
+            
             // Parse markdown into Lexical format
-            const lexical = this.parseMarkdownToMobiledoc(cleanMarkdown);
+            const lexical = this.parseMarkdownToMobiledoc(contentWithoutFirstImage);
             
             // Log the Lexical content for debugging
             console.log('Generated Lexical content:', lexical);
@@ -841,6 +856,11 @@ export default class GhostyPostyPlugin extends Plugin {
                     status: frontMatter.status || 'draft'
                 }]
             };
+            
+            // Add featured image if found
+            if (featuredImage) {
+                postData.posts[0].feature_image = featuredImage;
+            }
             
             // Add tags if present
             if (frontMatter.tags && frontMatter.tags.length > 0) {
@@ -860,7 +880,8 @@ export default class GhostyPostyPlugin extends Plugin {
                     lexical: JSON.stringify(lexical).substring(0, 100) + '...',
                     status: frontMatter.status || 'draft',
                     tags: postData.posts[0].tags || [],
-                    published_at: postData.posts[0].published_at || null
+                    published_at: postData.posts[0].published_at || null,
+                    feature_image: featuredImage
                 }]
             }));
             
