@@ -1,5 +1,6 @@
 {
   "ghostUrl": "https://birchtree.me",
   "apiKey": "67df2866dddb7bd2195ba454:b4d2f57e82a87addc909a991f0d710cd77746d6d62d1f146351de4a678bd4c15",
-  "imagesDirectory": "assets/files"
+  "imagesDirectory": "assets/files",
+  "openEditorAfterPublish": true
 }

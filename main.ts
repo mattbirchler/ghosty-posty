@@ -4,6 +4,7 @@ interface GhostyPostySettings {
     ghostUrl: string;
     apiKey: string;
     imagesDirectory: string;
+    openEditorAfterPublish: boolean;
 }
 
 interface FrontMatterData {
@@ -16,7 +17,8 @@ interface FrontMatterData {
 const DEFAULT_SETTINGS: GhostyPostySettings = {
     ghostUrl: '',
     apiKey: '',
-    imagesDirectory: 'assets/files'
+    imagesDirectory: 'assets/files',
+    openEditorAfterPublish: false
 }
 
 export default class GhostyPostyPlugin extends Plugin {
@@ -585,6 +587,220 @@ export default class GhostyPostyPlugin extends Plugin {
         }
     }
     
+    parseMarkdownToMobiledoc(content: string): any {
+        interface LexicalNode {
+            type: string;
+            children?: LexicalNode[];
+            format?: number;
+            style?: string;
+            text?: string;
+            detail?: number;
+            mode?: string;
+            direction?: string;
+            indent?: number;
+            version?: number;
+            [key: string]: any;
+        }
+
+        // Helper function to create a text node
+        const createTextNode = (text: string, format: number = 0): LexicalNode => ({
+            type: "extended-text",
+            detail: 0,
+            format,
+            mode: "normal",
+            style: "",
+            text,
+            version: 1
+        });
+
+        // Helper function to create a paragraph node
+        const createParagraphNode = (children: LexicalNode[]): LexicalNode => ({
+            type: "paragraph",
+            children,
+            direction: "ltr",
+            format: 0,
+            indent: 0,
+            version: 1
+        });
+
+        // Helper function to process text with links and formatting
+        const processTextWithMarkup = (text: string): LexicalNode[] => {
+            const nodes: LexicalNode[] = [];
+            let currentText = text;
+            let lastIndex = 0;
+
+            // Process links first
+            const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+            let linkMatch;
+            while ((linkMatch = linkRegex.exec(text)) !== null) {
+                const [fullMatch, linkText, url] = linkMatch;
+                const matchIndex = linkMatch.index;
+
+                // Add text before the link if any
+                if (matchIndex > lastIndex) {
+                    nodes.push(createTextNode(text.slice(lastIndex, matchIndex)));
+                }
+
+                // Add the link node
+                nodes.push({
+                    type: "link",
+                    url,
+                    children: [createTextNode(linkText)],
+                    direction: "ltr",
+                    format: 0,
+                    indent: 0,
+                    version: 1
+                });
+
+                lastIndex = matchIndex + fullMatch.length;
+            }
+
+            // Add remaining text
+            if (lastIndex < text.length) {
+                const remainingText = text.slice(lastIndex);
+                
+                // Process bold text first
+                const boldRegex = /\*\*([^*]+)\*\*|__([^_]+)__/g;
+                let boldMatch;
+                let boldLastIndex = 0;
+                
+                while ((boldMatch = boldRegex.exec(remainingText)) !== null) {
+                    const [fullMatch, content] = boldMatch;
+                    const matchIndex = boldMatch.index;
+                    
+                    // Add text before bold
+                    if (matchIndex > boldLastIndex) {
+                        const beforeText = remainingText.slice(boldLastIndex, matchIndex);
+                        // Process italic in text before bold
+                        const italicNodes = processItalicText(beforeText);
+                        nodes.push(...italicNodes);
+                    }
+                    
+                    // Add bold text (format 1 represents bold)
+                    nodes.push(createTextNode(content, 1));
+                    
+                    boldLastIndex = matchIndex + fullMatch.length;
+                }
+                
+                // Process remaining text for italic
+                if (boldLastIndex < remainingText.length) {
+                    const italicText = remainingText.slice(boldLastIndex);
+                    const italicNodes = processItalicText(italicText);
+                    nodes.push(...italicNodes);
+                }
+            }
+
+            return nodes;
+        };
+
+        // Helper function to process italic text
+        const processItalicText = (text: string): LexicalNode[] => {
+            const nodes: LexicalNode[] = [];
+            let lastIndex = 0;
+            
+            // Match single asterisks for italic, but not if they're part of a word
+            const italicRegex = /(?<!\*)\*([^*]+)\*(?!\*)/g;
+            let italicMatch;
+            
+            while ((italicMatch = italicRegex.exec(text)) !== null) {
+                const [fullMatch, content] = italicMatch;
+                const matchIndex = italicMatch.index;
+                
+                // Add text before italic
+                if (matchIndex > lastIndex) {
+                    nodes.push(createTextNode(text.slice(lastIndex, matchIndex)));
+                }
+                
+                // Add italic text (format 2 represents italic)
+                nodes.push(createTextNode(content, 2));
+                
+                lastIndex = matchIndex + fullMatch.length;
+            }
+            
+            // Add any remaining text
+            if (lastIndex < text.length) {
+                nodes.push(createTextNode(text.slice(lastIndex)));
+            }
+            
+            return nodes.length > 0 ? nodes : [createTextNode(text)];
+        };
+
+        // Process the content
+        const rootChildren: LexicalNode[] = [];
+        const paragraphs = content.split('\n\n').filter(p => p.trim());
+
+        paragraphs.forEach(paragraph => {
+            const trimmedParagraph = paragraph.trim();
+            
+            // Check for headings
+            const headingMatch = trimmedParagraph.match(/^(#{1,6})\s+(.+)$/m);
+            if (headingMatch) {
+                const level = headingMatch[1].length;
+                const text = headingMatch[2].trim();
+                rootChildren.push({
+                    type: "heading",
+                    tag: `h${level}`,
+                    children: processTextWithMarkup(text),
+                    direction: "ltr",
+                    format: 0,
+                    indent: 0,
+                    version: 1
+                });
+                return;
+            }
+
+            // Check for blockquotes
+            if (trimmedParagraph.startsWith('>')) {
+                const quoteText = trimmedParagraph.substring(1).trim();
+                rootChildren.push({
+                    type: "quote",
+                    children: [createParagraphNode(processTextWithMarkup(quoteText))],
+                    direction: "ltr",
+                    format: 0,
+                    indent: 0,
+                    version: 1
+                });
+                return;
+            }
+
+            // Check for images
+            const imageMatch = trimmedParagraph.match(/^!\[(.*?)\]\((.*?)\)$/);
+            if (imageMatch) {
+                const [_, alt, src] = imageMatch;
+                rootChildren.push({
+                    type: "image",
+                    src,
+                    altText: alt,
+                    width: undefined,
+                    height: undefined,
+                    maxWidth: "100%",
+                    showCaption: false,
+                    caption: undefined,
+                    direction: "ltr",
+                    format: 0,
+                    indent: 0,
+                    version: 1
+                });
+                return;
+            }
+
+            // Regular paragraph
+            rootChildren.push(createParagraphNode(processTextWithMarkup(trimmedParagraph)));
+        });
+
+        // Create the root node
+        const root: LexicalNode = {
+            type: "root",
+            children: rootChildren,
+            direction: "ltr",
+            format: 0,
+            indent: 0,
+            version: 1
+        };
+
+        return JSON.stringify({ root });
+    }
+
     async publishToGhost(title: string, markdownContent: string, frontMatter: FrontMatterData): Promise<{ success: boolean, error?: string, postUrl?: string }> {
         try {
             const { ghostUrl, apiKey } = this.settings;
@@ -608,35 +824,20 @@ export default class GhostyPostyPlugin extends Plugin {
                 };
             }
             
-            // Log API key format for debugging (masking the secret)
-            console.log('API Key ID:', id);
-            console.log('API Key Secret (first 6 chars):', secret.substring(0, 6) + '...');
-            
-            // Construct the API URL for creating posts
-            const apiUrl = `${baseUrl}/ghost/api/admin/posts/`;
-            console.log('Publishing to:', apiUrl);
-            
             // Clean up the markdown content
             const cleanMarkdown = markdownContent.trim();
-            console.log('Markdown length:', cleanMarkdown.length);
+            
+            // Parse markdown into Lexical format
+            const lexical = this.parseMarkdownToMobiledoc(cleanMarkdown);
+            
+            // Log the Lexical content for debugging
+            console.log('Generated Lexical content:', lexical);
             
             // Prepare the post data
             const postData: any = {
                 posts: [{
                     title: title,
-                    markdown: cleanMarkdown,
-                    // Add mobiledoc format for Ghost v4+
-                    mobiledoc: JSON.stringify({
-                        version: "0.3.1",
-                        markups: [],
-                        atoms: [],
-                        cards: [
-                            ["markdown", {
-                                markdown: cleanMarkdown
-                            }]
-                        ],
-                        sections: [[10, 0]]
-                    }),
+                    lexical: lexical,
                     status: frontMatter.status || 'draft'
                 }]
             };
@@ -656,7 +857,7 @@ export default class GhostyPostyPlugin extends Plugin {
             console.log('Post data sample:', JSON.stringify({
                 posts: [{
                     title: title,
-                    markdown: cleanMarkdown.substring(0, 100) + '...',
+                    lexical: JSON.stringify(lexical).substring(0, 100) + '...',
                     status: frontMatter.status || 'draft',
                     tags: postData.posts[0].tags || [],
                     published_at: postData.posts[0].published_at || null
@@ -670,7 +871,7 @@ export default class GhostyPostyPlugin extends Plugin {
                 console.log('Using JWT token format for authentication');
                 
                 const response = await requestUrl({
-                    url: apiUrl,
+                    url: `${baseUrl}/ghost/api/admin/posts/`,
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -695,6 +896,12 @@ export default class GhostyPostyPlugin extends Plugin {
                         console.log('Could not extract post URL from response');
                     }
                     
+                    // If enabled, open the editor URL
+                    if (this.settings.openEditorAfterPublish && jsonData?.posts?.[0]?.id) {
+                        const editorUrl = `${this.settings.ghostUrl}/ghost/#/editor/post/${jsonData.posts[0].id}`;
+                        window.open(editorUrl, '_blank');
+                    }
+                    
                     return { 
                         success: true,
                         postUrl: postUrl
@@ -707,7 +914,7 @@ export default class GhostyPostyPlugin extends Plugin {
                     // Try alternate method if we got a token error
                     if (errorResponse.includes('INVALID_JWT') || errorResponse.includes('Invalid token')) {
                         console.log('Token error detected, trying Node.js method with proper JWT...');
-                        return await this.publishWithNode(apiUrl, id, secret, postData);
+                        return await this.publishWithNode(baseUrl, id, secret, postData);
                     }
                     
                     return { 
@@ -719,7 +926,7 @@ export default class GhostyPostyPlugin extends Plugin {
                 console.error('Obsidian request failed when publishing, trying Node.js:', error);
                 
                 // Try with Node.js as fallback
-                return await this.publishWithNode(apiUrl, id, secret, postData);
+                return await this.publishWithNode(baseUrl, id, secret, postData);
             }
         } catch (error) {
             console.error('Publish error:', error);
@@ -843,6 +1050,12 @@ export default class GhostyPostyPlugin extends Plugin {
                                     console.log('Could not extract post URL from response');
                                 }
                                 
+                                // If enabled, open the editor URL
+                                if (this.settings.openEditorAfterPublish && jsonData?.posts?.[0]?.id) {
+                                    const editorUrl = `${this.settings.ghostUrl}/ghost/#/editor/post/${jsonData.posts[0].id}`;
+                                    window.open(editorUrl, '_blank');
+                                }
+                                
                                 resolve({ 
                                     success: true,
                                     postUrl: postUrl
@@ -946,6 +1159,16 @@ class GhostyPostySettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     // Remove leading and trailing slashes for consistency
                     this.plugin.settings.imagesDirectory = value.replace(/^\/+|\/+$/g, '');
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Open Editor After Publish')
+            .setDesc('Whether to open the editor after publishing a post')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.openEditorAfterPublish)
+                .onChange(async (value) => {
+                    this.plugin.settings.openEditorAfterPublish = value;
                     await this.plugin.saveSettings();
                 }));
 
