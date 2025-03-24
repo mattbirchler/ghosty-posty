@@ -6,6 +6,8 @@ interface GhostyPostySettings {
     apiKey: string;
     imagesDirectory: string;
     openEditorAfterPublish: boolean;
+    recentPostsFile: string;
+    enableRecentPosts: boolean;
 }
 
 interface FrontMatterData {
@@ -19,7 +21,9 @@ const DEFAULT_SETTINGS: GhostyPostySettings = {
     ghostUrl: '',
     apiKey: '',
     imagesDirectory: 'assets/files',
-    openEditorAfterPublish: false
+    openEditorAfterPublish: false,
+    recentPostsFile: 'Recent Ghost Posts.md',
+    enableRecentPosts: false
 }
 
 export default class GhostyPostyPlugin extends Plugin {
@@ -51,6 +55,27 @@ export default class GhostyPostyPlugin extends Plugin {
                 return true;
             }
         });
+
+        // Add a command to manually refresh recent posts
+        this.addCommand({
+            id: 'refresh-recent-posts',
+            name: 'Refresh recent Ghost posts',
+            checkCallback: (checking: boolean) => {
+                if (checking) {
+                    return this.settings.enableRecentPosts && 
+                           !!this.settings.ghostUrl && 
+                           !!this.settings.apiKey;
+                }
+                
+                this.updateRecentPosts();
+                return true;
+            }
+        });
+
+        // Update recent posts on load if enabled
+        if (this.settings.enableRecentPosts) {
+            this.updateRecentPosts();
+        }
 
         console.log('Loaded Ghosty Posty plugin');
     }
@@ -1156,6 +1181,110 @@ export default class GhostyPostyPlugin extends Plugin {
     async saveSettings() {
         await this.saveData(this.settings);
     }
+
+    async fetchRecentPosts(): Promise<{ title: string, url: string, published_at: string, tags: string[] }[]> {
+        try {
+            const { ghostUrl, apiKey } = this.settings;
+            
+            if (!ghostUrl || !apiKey) {
+                throw new Error('Ghost URL and API Key are required');
+            }
+            
+            // Clean up the URL
+            const baseUrl = ghostUrl.trim().replace(/\/$/, '');
+            
+            // Extract API credentials
+            const [id, secret] = apiKey.split(':');
+            if (!id || !secret) {
+                throw new Error('Invalid API key format');
+            }
+            
+            // Generate auth token
+            const authToken = this.generateGhostAdminToken(id, secret);
+            
+            // Fetch recent posts (increased to 20)
+            const response = await requestUrl({
+                url: `${baseUrl}/ghost/api/admin/posts/?limit=20&order=published_at%20desc&formats=mobiledoc,html,plaintext&include=tags`,
+                method: 'GET',
+                headers: {
+                    'Authorization': authToken
+                }
+            });
+            
+            if (response.status !== 200) {
+                throw new Error(`API Error: ${response.status}`);
+            }
+            
+            const posts = response.json.posts;
+            return posts.map((post: any) => ({
+                title: post.title,
+                url: post.url,
+                published_at: post.published_at,
+                tags: (post.tags || []).map((tag: any) => tag.name)
+            }));
+        } catch (error) {
+            console.error('Error fetching recent posts:', error);
+            throw error;
+        }
+    }
+
+    async updateRecentPosts() {
+        try {
+            if (!this.settings.enableRecentPosts) {
+                return;
+            }
+
+            const posts = await this.fetchRecentPosts();
+            
+            // Format date helper function
+            const formatDate = (dateStr: string) => {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+            };
+            
+            // Create content for the file
+            const content = [
+                '# Recent Ghost Posts',
+                '',
+                'Last updated: ' + new Date().toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                }),
+                '',
+                '| Title | Date | Tags |',
+                '|-------|------|------|',
+                ...posts.map(post => {
+                    const date = formatDate(post.published_at);
+                    const title = `[${post.title}](${post.url})`;
+                    const tags = post.tags.length > 0 ? post.tags.join(', ') : '-';
+                    // Escape any pipe characters in the content
+                    const escapedTitle = title.replace(/\|/g, '\\|');
+                    const escapedTags = tags.replace(/\|/g, '\\|');
+                    return `| ${escapedTitle} | ${date} | ${escapedTags} |`;
+                })
+            ].join('\n');
+
+            // Get or create the file
+            const filePath = this.settings.recentPostsFile;
+            let file = this.app.vault.getAbstractFileByPath(filePath);
+            
+            if (!file) {
+                file = await this.app.vault.create(filePath, content);
+                new Notice(`Created recent posts file: ${filePath}`);
+            } else if (file instanceof TFile) {
+                await this.app.vault.modify(file, content);
+                new Notice('Updated recent posts');
+            }
+        } catch (error) {
+            console.error('Error updating recent posts:', error);
+            new Notice(`Error updating recent posts: ${error}`);
+        }
+    }
 }
 
 class GhostyPostySettingTab extends PluginSettingTab {
@@ -1175,9 +1304,9 @@ class GhostyPostySettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Ghost Blog URL')
-            .setDesc('URL of your Ghost blog (e.g., https://yourblog.ghost.io)')
+            .setDesc('URL of your Ghost blog (ex: https://yourblog.com)')
             .addText(text => text
-                .setPlaceholder('https://yourblog.ghost.io')
+                .setPlaceholder('https://yourblog.com')
                 .setValue(this.plugin.settings.ghostUrl)
                 .onChange(async (value) => {
                     this.plugin.settings.ghostUrl = value;
@@ -1214,6 +1343,27 @@ class GhostyPostySettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.openEditorAfterPublish)
                 .onChange(async (value) => {
                     this.plugin.settings.openEditorAfterPublish = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Recent Posts File')
+            .setDesc('The file name for the recent posts file')
+            .addText(text => text
+                .setPlaceholder('Recent Ghost Posts.md')
+                .setValue(this.plugin.settings.recentPostsFile)
+                .onChange(async (value) => {
+                    this.plugin.settings.recentPostsFile = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Enable Recent Posts')
+            .setDesc('Whether to enable the recent posts feature')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableRecentPosts)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableRecentPosts = value;
                     await this.plugin.saveSettings();
                 }));
 

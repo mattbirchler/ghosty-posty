@@ -72,6 +72,19 @@ export class PublishPreviewModal extends Modal {
         previewContainer.style.borderRadius = '4px';
         previewContainer.style.marginBottom = '20px';
 
+        // Add style element for preview container
+        const styleEl = document.createElement('style');
+        styleEl.textContent = `
+            .publish-preview-container img {
+                max-width: 300px;
+                height: auto;
+                display: block;
+                margin: 10px 0;
+                border-radius: 8px;
+            }
+        `;
+        previewContainer.appendChild(styleEl);
+
         // Create preview element
         this.previewEl = previewContainer.createDiv();
         
