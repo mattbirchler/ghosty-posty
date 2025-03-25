@@ -12,7 +12,7 @@ interface GhostyPostySettings {
 
 interface FrontMatterData {
     tags?: string[];
-    status?: 'draft' | 'published';
+    status?: 'draft' | 'published' | 'scheduled';
     time?: string;
     title?: string;
     featured?: boolean;
@@ -533,7 +533,8 @@ export default class GhostyPostyPlugin extends Plugin {
                 status: frontMatter.status || 'draft',
                 tags: frontMatter.tags || [],
                 featured: frontMatter.featured || false,
-                visibility: frontMatter.visibility || 'public'
+                visibility: frontMatter.visibility || 'public',
+                scheduledTime: frontMatter.time ? new Date(frontMatter.time) : new Date()
             };
             
             // Show the preview modal
@@ -555,7 +556,8 @@ export default class GhostyPostyPlugin extends Plugin {
                             status: options.status,
                             tags: options.tags,
                             featured: options.featured,
-                            visibility: options.visibility
+                            visibility: options.visibility,
+                            time: options.scheduledTime ? options.scheduledTime.toISOString() : undefined
                         }
                     );
                     
@@ -918,7 +920,8 @@ export default class GhostyPostyPlugin extends Plugin {
                     lexical: lexical,
                     status: frontMatter.status || 'draft',
                     featured: frontMatter.featured || false,
-                    visibility: frontMatter.visibility || 'public'
+                    visibility: frontMatter.visibility || 'public',
+                    published_at: null // Initialize to null
                 }]
             };
             
@@ -933,10 +936,13 @@ export default class GhostyPostyPlugin extends Plugin {
                 console.log('Adding tags:', postData.posts[0].tags);
             }
             
-            // Add scheduled time if present and status is 'published'
-            if (frontMatter.time && frontMatter.status === 'published') {
+            // Handle published_at field based on status
+            if (frontMatter.status === 'scheduled' && frontMatter.time) {
                 postData.posts[0].published_at = frontMatter.time;
-                console.log('Scheduling post for:', frontMatter.time);
+                console.log('Setting scheduled time (UTC):', frontMatter.time);
+            } else if (frontMatter.status === 'published') {
+                postData.posts[0].published_at = new Date().toISOString();
+                console.log('Setting publish time to now (UTC)');
             }
             
             console.log('Post data sample:', JSON.stringify({
