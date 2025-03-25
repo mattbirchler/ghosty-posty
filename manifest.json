@@ -3,9 +3,9 @@
 	"name": "Ghosty Posty",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Publish to Ghost from Obsidian",
+	"description": "Publish to Ghost with ease.",
 	"author": "Matt Birchler",
-	"authorUrl": "",
+	"authorUrl": "https://github.com/mattbirchler",
 	"isDesktopOnly": false,
 	"license": "MIT"
 } 
