@@ -6,5 +6,6 @@
 	"description": "Publish to Ghost from Obsidian",
 	"author": "",
 	"authorUrl": "",
-	"isDesktopOnly": false
+	"isDesktopOnly": false,
+	"license": "MIT"
 } 
