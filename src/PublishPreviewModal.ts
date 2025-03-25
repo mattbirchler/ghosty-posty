@@ -1,4 +1,5 @@
 import { App, Modal, Setting, MarkdownRenderer, Component, DropdownComponent } from 'obsidian';
+import './styles.css';
 
 export interface PublishOptions {
     status: 'draft' | 'published' | 'scheduled';
@@ -84,7 +85,9 @@ export class PublishPreviewModal extends Modal {
             value: this.formatDateForInput(this.currentOptions.scheduledTime)
         });
         
-        dateInput.style.marginRight = '10px';
+        dateInput.type = 'datetime-local';
+        dateInput.value = this.formatDateForInput(this.currentOptions.scheduledTime);
+        dateInput.className = 'publish-preview-datetime-input';
         
         dateInput.addEventListener('input', (e) => {
             const target = e.target as HTMLInputElement;
@@ -145,27 +148,8 @@ export class PublishPreviewModal extends Modal {
 
         // Create preview container with max height and scrolling
         const previewContainer = contentEl.createDiv({ cls: 'publish-preview-container' });
-        previewContainer.style.maxHeight = '200px';
-        previewContainer.style.overflow = 'auto';
-        previewContainer.style.padding = '10px';
-        previewContainer.style.border = '1px solid var(--background-modifier-border)';
-        previewContainer.style.borderRadius = '4px';
-        previewContainer.style.marginBottom = '20px';
 
-        // Add style element for preview container
-        const styleEl = document.createElement('style');
-        styleEl.textContent = `
-            .publish-preview-container img {
-                max-width: 300px;
-                height: auto;
-                display: block;
-                margin: 10px 0;
-                border-radius: 8px;
-            }
-        `;
-        previewContainer.appendChild(styleEl);
-
-        // Create preview element
+        // Add preview element
         this.previewEl = previewContainer.createDiv();
         
         // Render markdown preview
@@ -178,10 +162,6 @@ export class PublishPreviewModal extends Modal {
 
         // Add buttons
         const buttonContainer = contentEl.createDiv({ cls: 'publish-preview-buttons' });
-        buttonContainer.style.display = 'flex';
-        buttonContainer.style.justifyContent = 'flex-end';
-        buttonContainer.style.gap = '10px';
-        buttonContainer.style.marginTop = '20px';
 
         const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
         cancelButton.addEventListener('click', () => this.close());
