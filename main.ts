@@ -78,13 +78,9 @@ export default class GhostyPostyPlugin extends Plugin {
         if (this.settings.enableRecentPosts) {
             this.updateRecentPosts();
         }
-
-        console.log('Loaded Ghosty Posty plugin');
     }
     
     parseFrontMatter(content: string): { frontMatter: FrontMatterData, markdownContent: string } {
-        console.log('Parsing frontmatter from note');
-        
         // Default values
         const frontMatter: FrontMatterData = {
             status: 'draft',
@@ -95,22 +91,18 @@ export default class GhostyPostyPlugin extends Plugin {
         
         // Check if the content has frontmatter (starts with ---)
         if (!content.startsWith('---')) {
-            console.log('No frontmatter found, using entire content');
             return { frontMatter, markdownContent: content };
         }
         
         // Find the end of the frontmatter
         const secondDivider = content.indexOf('---', 3);
         if (secondDivider === -1) {
-            console.log('No closing frontmatter delimiter found');
             return { frontMatter, markdownContent: content };
         }
         
         // Extract the frontmatter and the remaining content
         const frontMatterText = content.substring(3, secondDivider).trim();
         const markdownContent = content.substring(secondDivider + 3).trim();
-        
-        console.log('Found frontmatter:', frontMatterText);
         
         // Parse frontmatter content
         const lines = frontMatterText.split('\n');
@@ -193,8 +185,6 @@ export default class GhostyPostyPlugin extends Plugin {
             return content;
         }
         
-        console.log(`Found ${imagePaths.length} images to upload:`, imagePaths);
-        
         // Process each image and get Ghost URLs
         const imageMap = new Map<string, string>();
         
@@ -205,7 +195,6 @@ export default class GhostyPostyPlugin extends Plugin {
                     imageMap.set(imagePath, ghostUrl);
                 }
             } catch (error) {
-                console.error(`Error uploading image ${imagePath}:`, error);
                 new Notice(`Failed to upload image ${imagePath}: ${error}`);
             }
         }
@@ -233,7 +222,6 @@ export default class GhostyPostyPlugin extends Plugin {
             );
             
             if (!file || !(file instanceof TFile)) {
-                console.error(`File not found: ${imagePath}`);
                 new Notice(`Image not found: ${imagePath}`);
                 return null;
             }
@@ -244,14 +232,13 @@ export default class GhostyPostyPlugin extends Plugin {
             // Upload to Ghost
             const uploadUrl = await this.uploadFileToGhost(file.name, fileData);
             if (uploadUrl) {
-                console.log(`Successfully uploaded ${file.name} to Ghost: ${uploadUrl}`);
                 return uploadUrl;
             } else {
-                console.error(`Failed to upload ${file.name} to Ghost`);
+                new Notice('Failed to upload image');
                 return null;
             }
         } catch (error) {
-            console.error(`Error uploading image ${imagePath}:`, error);
+            new Notice(`Error uploading image ${imagePath}: ${error}`);
             return null;
         }
     }
@@ -296,7 +283,6 @@ export default class GhostyPostyPlugin extends Plugin {
             
             // Construct the API URL for uploading images
             const apiUrl = `${baseUrl}/ghost/api/admin/images/upload/`;
-            console.log('Uploading image to:', apiUrl);
             
             // Create FormData with the file
             // Can't use regular FormData in Obsidian, so we need to use a custom boundary
@@ -338,20 +324,16 @@ export default class GhostyPostyPlugin extends Plugin {
                 });
                 
                 if (response.status >= 200 && response.status < 300) {
-                    console.log('Image upload successful:', response.json);
                     return response.json?.images?.[0]?.url || null;
                 } else {
-                    console.error('API Error during image upload:', response);
                     return null;
                 }
             } catch (error) {
-                console.error('Image upload failed, trying Node.js:', error);
-                
                 // Try with Node.js as fallback
                 return await this.uploadFileWithNode(apiUrl, id, secret, fileName, fileData);
             }
         } catch (error) {
-            console.error('Image upload error:', error);
+            new Notice(`Error uploading image ${fileName}: ${error}`);
             return null;
         }
     }
@@ -364,15 +346,13 @@ export default class GhostyPostyPlugin extends Plugin {
                 const nodeRequire = window.require;
                 
                 if (!nodeRequire) {
-                    console.log('Node require not available for image upload');
-                    return resolve(null);
+                    resolve(null);
+                    return;
                 }
                 
                 const https = nodeRequire('https');
                 const crypto = nodeRequire('crypto');
                 const urlObj = new URL(url);
-                
-                console.log('Uploading image via Node.js to bypass CORS');
                 
                 // Create boundary for multipart/form-data
                 const boundary = '----NodeJSFormBoundary' + Math.random().toString(16).substring(2);
@@ -459,22 +439,17 @@ export default class GhostyPostyPlugin extends Plugin {
                         if (res.statusCode >= 200 && res.statusCode < 300) {
                             try {
                                 const jsonData = JSON.parse(data);
-                                console.log('Node.js image upload successful:', jsonData);
                                 resolve(jsonData?.images?.[0]?.url || null);
                             } catch (e) {
-                                console.error('Error parsing JSON from image upload response:', e);
                                 resolve(null);
                             }
                         } else {
-                            console.error('API Error from Node.js image upload:', res.statusCode);
-                            console.error('Error response body:', data);
                             resolve(null);
                         }
                     });
                 });
                 
                 req.on('error', (error: Error) => {
-                    console.error('Node.js image upload error:', error);
                     resolve(null);
                 });
                 
@@ -483,7 +458,6 @@ export default class GhostyPostyPlugin extends Plugin {
                 req.end();
                 
             } catch (error) {
-                console.error('Error in Node.js image upload:', error);
                 resolve(null);
             }
         });
@@ -516,14 +490,8 @@ export default class GhostyPostyPlugin extends Plugin {
             // Parse frontmatter
             const { frontMatter, markdownContent } = this.parseFrontMatter(content);
             
-            // Create a placeholder notice while we process images
-            const statusNotice = new Notice(`Processing images...`, 0);
-            
             // Process and upload images
             const processedContent = await this.processImageLinks(markdownContent, view);
-            
-            // Remove the placeholder notice
-            statusNotice.hide();
             
             // Use frontmatter title if available, otherwise use filename
             const title = frontMatter.title || fileName;
@@ -544,9 +512,6 @@ export default class GhostyPostyPlugin extends Plugin {
                 processedContent,
                 initialOptions,
                 async (options: PublishOptions) => {
-                    // Create a new notice for publishing
-                    const publishNotice = new Notice(`Publishing to Ghost as ${options.status}...`, 0);
-                    
                     // Call the publish function with the selected options
                     const result = await this.publishToGhost(
                         title,
@@ -561,9 +526,6 @@ export default class GhostyPostyPlugin extends Plugin {
                         }
                     );
                     
-                    // Remove the publishing notice
-                    publishNotice.hide();
-                    
                     // Show success or error message
                     if (result.success) {
                         new Notice(`Successfully published "${title}" as ${options.status}`);
@@ -573,7 +535,6 @@ export default class GhostyPostyPlugin extends Plugin {
                 }
             ).open();
         } catch (error) {
-            console.error('Error publishing note:', error);
             new Notice(`Error publishing note: ${error}`);
         }
     }
@@ -585,7 +546,6 @@ export default class GhostyPostyPlugin extends Plugin {
             const crypto = window.require ? window.require('crypto') : null;
             
             if (!crypto) {
-                console.error('Crypto library not available');
                 // Fall back to the basic token format when crypto isn't available
                 return `Ghost ${id}:${secret}`;
             }
@@ -642,11 +602,9 @@ export default class GhostyPostyPlugin extends Plugin {
             
             // Create the complete JWT token
             const token = `${headerBase64}.${payloadBase64}.${signature}`;
-            console.log('Generated JWT token (masked): JWT...');
             
             return `Ghost ${token}`;
         } catch (error) {
-            console.error('Error generating token:', error);
             // Fall back to simple format in case of error
             return `Ghost ${id}:${secret}`;
         }
@@ -763,17 +721,19 @@ export default class GhostyPostyPlugin extends Plugin {
             const nodes: LexicalNode[] = [];
             let lastIndex = 0;
             
-            // Match single asterisks for italic, but not if they're part of a word
-            const italicRegex = /(?<!\*)\*([^*]+)\*(?!\*)/g;
+            // Match single asterisks for italic, avoiding double asterisks (bold)
+            // and word-internal asterisks by checking boundaries
+            const italicRegex = /(?:^|\s|\()\*([^*]+)\*(?=$|\s|[.,!?;)])/g;
             let italicMatch;
             
             while ((italicMatch = italicRegex.exec(text)) !== null) {
                 const [fullMatch, content] = italicMatch;
                 const matchIndex = italicMatch.index;
+                const starIndex = fullMatch.indexOf('*');
                 
-                // Add text before italic
-                if (matchIndex > lastIndex) {
-                    nodes.push(createTextNode(text.slice(lastIndex, matchIndex)));
+                // Add text before italic, including any leading space/punctuation
+                if (matchIndex + starIndex > lastIndex) {
+                    nodes.push(createTextNode(text.slice(lastIndex, matchIndex + starIndex)));
                 }
                 
                 // Add italic text (format 2 represents italic)
@@ -910,9 +870,6 @@ export default class GhostyPostyPlugin extends Plugin {
             // Parse markdown into Lexical format
             const lexical = this.parseMarkdownToMobiledoc(contentWithoutFirstImage);
             
-            // Log the Lexical content for debugging
-            console.log('Generated Lexical content:', lexical);
-            
             // Prepare the post data
             const postData: any = {
                 posts: [{
@@ -933,34 +890,19 @@ export default class GhostyPostyPlugin extends Plugin {
             // Add tags if present
             if (frontMatter.tags && frontMatter.tags.length > 0) {
                 postData.posts[0].tags = frontMatter.tags.map(tag => ({ name: tag }));
-                console.log('Adding tags:', postData.posts[0].tags);
             }
             
             // Handle published_at field based on status
             if (frontMatter.status === 'scheduled' && frontMatter.time) {
                 postData.posts[0].published_at = frontMatter.time;
-                console.log('Setting scheduled time (UTC):', frontMatter.time);
             } else if (frontMatter.status === 'published') {
                 postData.posts[0].published_at = new Date().toISOString();
-                console.log('Setting publish time to now (UTC)');
             }
-            
-            console.log('Post data sample:', JSON.stringify({
-                posts: [{
-                    title: title,
-                    lexical: JSON.stringify(lexical).substring(0, 100) + '...',
-                    status: frontMatter.status || 'draft',
-                    tags: postData.posts[0].tags || [],
-                    published_at: postData.posts[0].published_at || null,
-                    feature_image: featuredImage
-                }]
-            }));
             
             // Try to publish the post using Obsidian's requestUrl
             try {
                 // Generate proper JWT token for Ghost Admin API
                 const authToken = this.generateGhostAdminToken(id, secret);
-                console.log('Using JWT token format for authentication');
                 
                 const response = await requestUrl({
                     url: `${baseUrl}/ghost/api/admin/posts/`,
@@ -973,12 +915,8 @@ export default class GhostyPostyPlugin extends Plugin {
                     throw: false
                 });
                 
-                console.log('Publish response status:', response.status);
-                console.log('Response headers:', response.headers);
-                
                 if (response.status >= 200 && response.status < 300) {
                     const jsonData = response.json;
-                    console.log('Publish successful:', jsonData);
                     
                     // Extract the post URL if available
                     let postUrl = '';
@@ -1037,20 +975,16 @@ export default class GhostyPostyPlugin extends Plugin {
                 const nodeRequire = window.require;
                 
                 if (!nodeRequire) {
-                    console.log('Node require not available for publishing');
-                    return resolve({ 
+                    resolve({ 
                         success: false, 
                         error: 'Could not access Node.js modules for publishing' 
                     });
+                    return;
                 }
                 
                 const https = nodeRequire('https');
                 const crypto = nodeRequire('crypto');
                 const urlObj = new URL(url);
-                
-                console.log('Publishing via Node.js to bypass CORS');
-                
-                const postContent = JSON.stringify(postData);
                 
                 // Generate proper JWT token using Node.js crypto
                 const now = Math.floor(Date.now() / 1000);
@@ -1091,10 +1025,11 @@ export default class GhostyPostyPlugin extends Plugin {
                 
                 // Create the complete JWT token
                 const token = `${headerBase64}.${payloadBase64}.${signature}`;
-                console.log('Generated Node.js JWT token (masked): JWT...');
                 
                 // Auth header with JWT token
                 const authToken = `Ghost ${token}`;
+                
+                const postContent = JSON.stringify(postData);
                 
                 const options = {
                     hostname: urlObj.hostname,
@@ -1107,17 +1042,6 @@ export default class GhostyPostyPlugin extends Plugin {
                     }
                 };
                 
-                console.log('Request options:', {
-                    hostname: urlObj.hostname,
-                    path: urlObj.pathname,
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Content-Length': postContent.length,
-                        'Authorization': 'Ghost JWT... (masked)'
-                    }
-                });
-                
                 const req = https.request(options, (res: any) => {
                     let data = '';
                     
@@ -1126,13 +1050,9 @@ export default class GhostyPostyPlugin extends Plugin {
                     });
                     
                     res.on('end', () => {
-                        console.log(`Node.js publish response status: ${res.statusCode}`);
-                        console.log('Response headers:', res.headers);
-                        
                         if (res.statusCode >= 200 && res.statusCode < 300) {
                             try {
                                 const jsonData = JSON.parse(data);
-                                console.log('Node.js publish successful:', jsonData);
                                 
                                 // Extract the post URL if available
                                 let postUrl = '';
@@ -1303,7 +1223,6 @@ export default class GhostyPostyPlugin extends Plugin {
                 new Notice('Updated recent posts');
             }
         } catch (error) {
-            console.error('Error updating recent posts:', error);
             new Notice(`Error updating recent posts: ${error}`);
         }
     }
@@ -1415,8 +1334,6 @@ class GhostyPostySettingTab extends PluginSettingTab {
 
     async testGhostConnection(): Promise<{ success: boolean, error?: string }> {
         try {
-            console.log('Testing connection to Ghost API...');
-            
             const { ghostUrl, apiKey } = this.plugin.settings;
             
             if (!ghostUrl || !apiKey) {
@@ -1428,13 +1345,11 @@ class GhostyPostySettingTab extends PluginSettingTab {
             
             // Clean up the URL
             const baseUrl = ghostUrl.trim().replace(/\/$/, '');
-            console.log(`Using base URL: ${baseUrl}`);
             
             // Make sure URL has correct format
             try {
                 new URL(baseUrl);
             } catch (e) {
-                console.error('Invalid URL format:', e);
                 return { 
                     success: false, 
                     error: 'Invalid URL format' 
@@ -1444,7 +1359,6 @@ class GhostyPostySettingTab extends PluginSettingTab {
             // Extract API credentials
             const [id, secret] = apiKey.split(':');
             if (!id || !secret) {
-                console.error('Invalid API key format');
                 return { 
                     success: false, 
                     error: 'Invalid API key format. Should be ID:SECRET' 
@@ -1467,7 +1381,6 @@ class GhostyPostySettingTab extends PluginSettingTab {
             for (const endpoint of possibleEndpoints) {
                 try {
                     const testUrl = `${baseUrl}${endpoint}`;
-                    console.log(`Testing endpoint: ${testUrl}`);
                     
                     const response = await requestUrl({
                         url: testUrl,
@@ -1479,11 +1392,10 @@ class GhostyPostySettingTab extends PluginSettingTab {
                     });
                     
                     if (response.status >= 200 && response.status < 300) {
-                        console.log('Connection successful!');
                         return { success: true };
                     }
                 } catch (e) {
-                    console.log(`Endpoint ${endpoint} failed:`, e);
+                    continue;
                 }
             }
             
@@ -1492,7 +1404,6 @@ class GhostyPostySettingTab extends PluginSettingTab {
                 error: 'Connection failed. Please check your Ghost URL and API Key' 
             };
         } catch (error) {
-            console.error('Error testing connection:', error);
             return { 
                 success: false, 
                 error: `Error during connection test: ${error}` 
