@@ -4,7 +4,7 @@
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Publish to Ghost from Obsidian",
-	"author": "",
+	"author": "Matt Birchler",
 	"authorUrl": "",
 	"isDesktopOnly": false,
 	"license": "MIT"
