@@ -757,6 +757,15 @@ export default class GhostyPostyPlugin extends Plugin {
         paragraphs.forEach(paragraph => {
             const trimmedParagraph = paragraph.trim();
             
+            // Check for horizontal rule
+            if (trimmedParagraph === '---') {
+                rootChildren.push({
+                    type: "horizontalrule",
+                    version: 1
+                });
+                return;
+            }
+            
             // Check for headings
             const headingMatch = trimmedParagraph.match(/^(#{1,6})\s+(.+)$/m);
             if (headingMatch) {
