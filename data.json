@@ -1,6 +1,6 @@
 {
-  "ghostUrl": "",
-  "apiKey": "",
+  "ghostUrl": "https://birchtree.me",
+  "apiKey": "67e2e14b5134375fd9318960:e1282cef0c5817de279f21036fbda7082929a0121b7590641b774f80ec8c0790",
   "imagesDirectory": "assets/files",
   "openEditorAfterPublish": true,
   "recentPostsFile": "",

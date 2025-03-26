@@ -16,3 +16,4 @@ main.js
 .vscode/
 *.swp
 *.swo 
+data.json
