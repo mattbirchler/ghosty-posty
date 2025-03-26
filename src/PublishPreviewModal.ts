@@ -44,6 +44,15 @@ export class PublishPreviewModal extends Modal {
         contentEl.createEl('h2', { text: 'Preview & Publish' });
 
         // Add publishing options
+        // Title input
+        new Setting(contentEl)
+            .setName('Title')
+            .addText(text => text
+                .setValue(this.title)
+                .onChange(value => {
+                    this.title = value;
+                }));
+
         let statusDropdown: DropdownComponent;
         const statusSetting = new Setting(contentEl)
             .setName('Status')
@@ -143,11 +152,16 @@ export class PublishPreviewModal extends Modal {
                         .filter(tag => tag.length > 0);
                 }));
 
-        // Title preview
-        contentEl.createEl('h3', { text: this.title });
+        // Preview section
+        const previewHeader = contentEl.createEl('div', { cls: 'publish-preview-header' });
+        const expandButton = previewHeader.createEl('button', { 
+            cls: 'clickable-icon publish-preview-toggle',
+            text: 'Show preview'
+        });
 
         // Create preview container with max height and scrolling
         const previewContainer = contentEl.createDiv({ cls: 'publish-preview-container' });
+        previewContainer.style.display = 'none'; // Hidden by default
 
         // Add preview element
         this.previewEl = previewContainer.createDiv();
@@ -158,17 +172,35 @@ export class PublishPreviewModal extends Modal {
             this.previewEl,
             '',
             this.previewComponent
-        );
+        ).then(() => {
+            // Add preview-image class to all images
+            const images = this.previewEl.querySelectorAll('img');
+            images.forEach(img => {
+                if (img instanceof HTMLElement) {
+                    img.addClasses(['preview-image']);
+                }
+            });
+        });
 
-        // Add buttons
-        const buttonContainer = contentEl.createDiv({ cls: 'publish-preview-buttons' });
+        // Add click handler for expand/collapse
+        expandButton.addEventListener('click', () => {
+            const isHidden = previewContainer.style.display === 'none';
+            previewContainer.style.display = isHidden ? 'block' : 'none';
+            expandButton.setText(isHidden ? 'Hide preview' : 'Show preview');
+        });
 
-        const cancelButton = buttonContainer.createEl('button', { text: 'Cancel' });
+        // Add buttons at the bottom
+        const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container publish-preview-buttons' });
+
+        const cancelButton = buttonContainer.createEl('button', { 
+            text: 'Cancel',
+            cls: 'modal-button'
+        });
         cancelButton.addEventListener('click', () => this.close());
 
         const publishButton = buttonContainer.createEl('button', { 
             text: 'Publish',
-            cls: 'mod-cta'
+            cls: 'modal-button mod-cta'
         });
         publishButton.addEventListener('click', () => {
             this.onSubmit(this.currentOptions);
