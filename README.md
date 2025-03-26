@@ -53,14 +53,14 @@ Using properties in your notes is completely optional, but you can use them to c
 
 Here's an exmaple that would work.
 
----
+\-\-\-
 title: My Great Blog post
 status: scheduled
 time: 2025-09-16T10:00:00Z
 tags: tutorial, guide
 featured: false
 visibility: public
----
+\-\-\-
 
 I'd recommend using a plugin like [Tempalter](https://github.com/SilentVoid13/Templater) to automatially generate these properties if you're going to use them regularly.
 
