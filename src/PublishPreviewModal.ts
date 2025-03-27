@@ -61,7 +61,7 @@ export class PublishPreviewModal extends Modal {
                 return dropdown
                     .addOption('draft', 'Draft')
                     .addOption('published', 'Published')
-                    .addOption('scheduled', 'Schedule for Later')
+                    .addOption('scheduled', 'Scheduled')
                     .setValue(this.currentOptions.status)
                     .onChange(value => {
                         const newStatus = value as 'draft' | 'published' | 'scheduled';
@@ -87,7 +87,8 @@ export class PublishPreviewModal extends Modal {
         // Schedule post setting
         const scheduleSetting = new Setting(contentEl)
             .setName('Schedule Post')
-            .setDesc('Set when this post should be published (in your local time zone)');
+            .setDesc('In your local time zone, only used when status is "scheduled"');
+        scheduleSetting.settingEl.addClass('schedule-setting');
 
         const dateInput = scheduleSetting.controlEl.createEl('input', {
             type: 'datetime-local',
@@ -112,9 +113,10 @@ export class PublishPreviewModal extends Modal {
             }
         });
 
-        // Initially hide/show schedule setting based on current status
-        scheduleSetting.settingEl.style.display = 
-            this.currentOptions.status === 'scheduled' ? 'flex' : 'none';
+        // Initially show/hide schedule setting based on current status
+        if (this.currentOptions.status === 'scheduled') {
+            scheduleSetting.settingEl.addClass('visible');
+        }
 
         // Visibility dropdown
         new Setting(contentEl)
@@ -151,43 +153,6 @@ export class PublishPreviewModal extends Modal {
                         .map(tag => tag.trim())
                         .filter(tag => tag.length > 0);
                 }));
-
-        // Preview section
-        const previewHeader = contentEl.createEl('div', { cls: 'publish-preview-header' });
-        const expandButton = previewHeader.createEl('button', { 
-            cls: 'clickable-icon publish-preview-toggle',
-            text: 'Show preview'
-        });
-
-        // Create preview container with max height and scrolling
-        const previewContainer = contentEl.createDiv({ cls: 'publish-preview-container' });
-        previewContainer.style.display = 'none'; // Hidden by default
-
-        // Add preview element
-        this.previewEl = previewContainer.createDiv();
-        
-        // Render markdown preview
-        MarkdownRenderer.renderMarkdown(
-            this.markdownContent,
-            this.previewEl,
-            '',
-            this.previewComponent
-        ).then(() => {
-            // Add preview-image class to all images
-            const images = this.previewEl.querySelectorAll('img');
-            images.forEach(img => {
-                if (img instanceof HTMLElement) {
-                    img.addClasses(['preview-image']);
-                }
-            });
-        });
-
-        // Add click handler for expand/collapse
-        expandButton.addEventListener('click', () => {
-            const isHidden = previewContainer.style.display === 'none';
-            previewContainer.style.display = isHidden ? 'block' : 'none';
-            expandButton.setText(isHidden ? 'Hide preview' : 'Show preview');
-        });
 
         // Add buttons at the bottom
         const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container publish-preview-buttons' });
