@@ -646,6 +646,29 @@ export default class GhostyPostyPlugin extends Plugin {
             version: 1
         });
 
+        // Helper function to create a list node
+        const createListNode = (listItems: LexicalNode[], listType: "bullet" | "number"): LexicalNode => ({
+            type: "list",
+            listType,
+            start: 1,
+            children: listItems,
+            direction: "ltr",
+            format: 0,
+            indent: 0,
+            version: 1
+        });
+
+        // Helper function to create a list item node
+        const createListItemNode = (children: LexicalNode[]): LexicalNode => ({
+            type: "listitem",
+            children,
+            direction: "ltr",
+            format: 0,
+            indent: 0,
+            value: 1,
+            version: 1
+        });
+
         // Helper function to process text with links and formatting
         const processTextWithMarkup = (text: string): LexicalNode[] => {
             const nodes: LexicalNode[] = [];
@@ -752,75 +775,123 @@ export default class GhostyPostyPlugin extends Plugin {
 
         // Process the content
         const rootChildren: LexicalNode[] = [];
-        const paragraphs = content.split('\n\n').filter(p => p.trim());
+        let currentListItems: LexicalNode[] | null = null;
+        let currentListType: "bullet" | "number" | null = null;
 
-        paragraphs.forEach(paragraph => {
-            const trimmedParagraph = paragraph.trim();
+        // First, split by paragraphs (double newlines)
+        const paragraphBlocks = content.split('\n\n').filter(p => p.trim());
+
+        paragraphBlocks.forEach(block => {
+            // Split each block into lines
+            const lines = block.split('\n').filter(line => line.trim());
             
-            // Check for horizontal rule
-            if (trimmedParagraph === '---') {
-                rootChildren.push({
-                    type: "horizontalrule",
-                    version: 1
-                });
-                return;
-            }
-            
-            // Check for headings
-            const headingMatch = trimmedParagraph.match(/^(#{1,6})\s+(.+)$/m);
-            if (headingMatch) {
-                const level = headingMatch[1].length;
-                const text = headingMatch[2].trim();
-                rootChildren.push({
-                    type: "heading",
-                    tag: `h${level}`,
-                    children: processTextWithMarkup(text),
-                    direction: "ltr",
-                    format: 0,
-                    indent: 0,
-                    version: 1
-                });
-                return;
-            }
+            // Process each line in the block
+            lines.forEach(line => {
+                const trimmedLine = line.trim();
+                
+                // Check for list items
+                const bulletListMatch = trimmedLine.match(/^[-*]\s+(.+)$/);
+                const numberListMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
 
-            // Check for blockquotes
-            if (trimmedParagraph.startsWith('>')) {
-                const quoteText = trimmedParagraph.substring(1).trim();
-                rootChildren.push({
-                    type: "quote",
-                    children: [createParagraphNode(processTextWithMarkup(quoteText))],
-                    direction: "ltr",
-                    format: 0,
-                    indent: 0,
-                    version: 1
-                });
-                return;
-            }
+                if (bulletListMatch || numberListMatch) {
+                    const listText = bulletListMatch ? bulletListMatch[1] : numberListMatch![2];
+                    const listType: "bullet" | "number" = bulletListMatch ? "bullet" : "number";
 
-            // Check for images
-            const imageMatch = trimmedParagraph.match(/^!\[(.*?)\]\((.*?)\)$/);
-            if (imageMatch) {
-                const [_, alt, src] = imageMatch;
-                rootChildren.push({
-                    type: "image",
-                    src,
-                    altText: alt,
-                    width: undefined,
-                    height: undefined,
-                    maxWidth: "100%",
-                    showCaption: false,
-                    caption: undefined,
-                    direction: "ltr",
-                    format: 0,
-                    indent: 0,
-                    version: 1
-                });
-                return;
-            }
+                    // If we're starting a new list or switching list types
+                    if (!currentListItems || currentListType !== listType) {
+                        // If we have a previous list, add it to root children
+                        if (currentListItems) {
+                            rootChildren.push(createListNode(currentListItems, currentListType!));
+                        }
+                        // Start a new list
+                        currentListItems = [];
+                        currentListType = listType;
+                    }
 
-            // Regular paragraph
-            rootChildren.push(createParagraphNode(processTextWithMarkup(trimmedParagraph)));
+                    // Add the list item
+                    currentListItems.push(createListItemNode([
+                        createParagraphNode(processTextWithMarkup(listText))
+                    ]));
+                    return;
+                }
+
+                // If this line isn't a list item but we have a current list
+                if (currentListItems) {
+                    rootChildren.push(createListNode(currentListItems, currentListType!));
+                    currentListItems = null;
+                    currentListType = null;
+                }
+
+                // Check for horizontal rule
+                if (trimmedLine === '---') {
+                    rootChildren.push({
+                        type: "horizontalrule",
+                        version: 1
+                    });
+                    return;
+                }
+                
+                // Check for headings
+                const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/m);
+                if (headingMatch) {
+                    const level = headingMatch[1].length;
+                    const text = headingMatch[2].trim();
+                    rootChildren.push({
+                        type: "heading",
+                        tag: `h${level}`,
+                        children: processTextWithMarkup(text),
+                        direction: "ltr",
+                        format: 0,
+                        indent: 0,
+                        version: 1
+                    });
+                    return;
+                }
+
+                // Check for blockquotes
+                if (trimmedLine.startsWith('>')) {
+                    const quoteText = trimmedLine.substring(1).trim();
+                    rootChildren.push({
+                        type: "quote",
+                        children: [createParagraphNode(processTextWithMarkup(quoteText))],
+                        direction: "ltr",
+                        format: 0,
+                        indent: 0,
+                        version: 1
+                    });
+                    return;
+                }
+
+                // Check for images
+                const imageMatch = trimmedLine.match(/^!\[(.*?)\]\((.*?)\)$/);
+                if (imageMatch) {
+                    const [_, alt, src] = imageMatch;
+                    rootChildren.push({
+                        type: "image",
+                        src,
+                        altText: alt,
+                        width: undefined,
+                        height: undefined,
+                        maxWidth: "100%",
+                        showCaption: false,
+                        caption: undefined,
+                        direction: "ltr",
+                        format: 0,
+                        indent: 0,
+                        version: 1
+                    });
+                    return;
+                }
+
+                // Regular paragraph
+                rootChildren.push(createParagraphNode(processTextWithMarkup(trimmedLine)));
+            });
         });
+
+        // If we have any remaining list items at the end, add them
+        if (currentListItems) {
+            rootChildren.push(createListNode(currentListItems, currentListType!));
+        }
 
         // Create the root node
         const root: LexicalNode = {
