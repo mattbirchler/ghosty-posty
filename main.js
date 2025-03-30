@@ -247,6 +247,11 @@ var GhostyPostyPlugin = class extends import_obsidian2.Plugin {
   convertObsidianImageLinks(content) {
     return content.replace(/!\[\[(.*?)\]\]/g, "![]($1)");
   }
+  formatInlineCode(content) {
+    return content.replace(/(?<!`)`([^`]+)`(?!`)/g, (match, code) => {
+      return match;
+    });
+  }
   async processImageLinks(content, view) {
     const imageRegex = /!\[\[(.*?)\]\]/g;
     const imagePaths = [];
@@ -273,6 +278,7 @@ var GhostyPostyPlugin = class extends import_obsidian2.Plugin {
       const regex = new RegExp(`!\\[\\[${this.escapeRegExp(imagePath)}\\]\\]`, "g");
       processedContent = processedContent.replace(regex, `![](${ghostUrl})`);
     }
+    processedContent = this.formatInlineCode(processedContent);
     return processedContent;
   }
   escapeRegExp(string) {
@@ -388,6 +394,10 @@ Content-Type: ${this.getMimeType(fileName)}\r
           iat: now,
           exp: fiveMinutesFromNow,
           aud: "/v5/admin/"
+        };
+        const encodeBase64 = (obj) => {
+          const str = JSON.stringify(obj);
+          return crypto.createHash("sha256").update(str).digest("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
         };
         const headerBase64 = Buffer.from(JSON.stringify(header)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
         const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
@@ -534,12 +544,12 @@ Content-Type: ${this.getMimeType(fileName)}\r
   }
   parseMarkdownToMobiledoc(content) {
     const createTextNode = (text, format = 0) => ({
-      type: "extended-text",
+      type: "text",
+      text,
       detail: 0,
       format,
       mode: "normal",
       style: "",
-      text,
       version: 1
     });
     const createParagraphNode = (children) => ({
@@ -571,70 +581,45 @@ Content-Type: ${this.getMimeType(fileName)}\r
     });
     const processTextWithMarkup = (text) => {
       const nodes = [];
-      let currentText = text;
-      let lastIndex = 0;
-      const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-      let linkMatch;
-      while ((linkMatch = linkRegex.exec(text)) !== null) {
-        const [fullMatch, linkText, url] = linkMatch;
-        const matchIndex = linkMatch.index;
-        if (matchIndex > lastIndex) {
-          nodes.push(createTextNode(text.slice(lastIndex, matchIndex)));
+      let currentIndex = 0;
+      const markupRegex = /(?:```[\s\S]*?```)|(?:`[^`]+`)|(?:\[([^\]]+)\]\(([^)]+)\))|(?:\*\*[^*]+\*\*)|(?:__[^_]+__)|(?:\*[^*]+\*)/g;
+      let match;
+      while ((match = markupRegex.exec(text)) !== null) {
+        if (match.index > currentIndex) {
+          nodes.push(createTextNode(text.slice(currentIndex, match.index)));
         }
-        nodes.push({
-          type: "link",
-          url,
-          children: [createTextNode(linkText)],
-          direction: "ltr",
-          format: 0,
-          indent: 0,
-          version: 1
-        });
-        lastIndex = matchIndex + fullMatch.length;
-      }
-      if (lastIndex < text.length) {
-        const remainingText = text.slice(lastIndex);
-        const boldRegex = /\*\*([^*]+)\*\*|__([^_]+)__/g;
-        let boldMatch;
-        let boldLastIndex = 0;
-        while ((boldMatch = boldRegex.exec(remainingText)) !== null) {
-          const [fullMatch, content2] = boldMatch;
-          const matchIndex = boldMatch.index;
-          if (matchIndex > boldLastIndex) {
-            const beforeText = remainingText.slice(boldLastIndex, matchIndex);
-            const italicNodes = processItalicText(beforeText);
-            nodes.push(...italicNodes);
+        const matchedText = match[0];
+        if (matchedText.startsWith("```")) {
+          nodes.push(createTextNode(matchedText));
+        } else if (matchedText.startsWith("`")) {
+          const code = matchedText.slice(1, -1);
+          nodes.push(createTextNode(code, 16));
+        } else if (matchedText.startsWith("[")) {
+          const linkMatch = /\[([^\]]+)\]\(([^)]+)\)/.exec(matchedText);
+          if (linkMatch) {
+            nodes.push({
+              type: "link",
+              url: linkMatch[2],
+              children: [createTextNode(linkMatch[1])],
+              direction: "ltr",
+              format: 0,
+              indent: 0,
+              version: 1
+            });
           }
-          nodes.push(createTextNode(content2, 1));
-          boldLastIndex = matchIndex + fullMatch.length;
+        } else if (matchedText.startsWith("**") || matchedText.startsWith("__")) {
+          const boldText = matchedText.slice(2, -2);
+          nodes.push(createTextNode(boldText, 1));
+        } else if (matchedText.startsWith("*")) {
+          const italicText = matchedText.slice(1, -1);
+          nodes.push(createTextNode(italicText, 2));
         }
-        if (boldLastIndex < remainingText.length) {
-          const italicText = remainingText.slice(boldLastIndex);
-          const italicNodes = processItalicText(italicText);
-          nodes.push(...italicNodes);
-        }
+        currentIndex = match.index + matchedText.length;
+      }
+      if (currentIndex < text.length) {
+        nodes.push(createTextNode(text.slice(currentIndex)));
       }
       return nodes;
-    };
-    const processItalicText = (text) => {
-      const nodes = [];
-      let lastIndex = 0;
-      const italicRegex = /(?:^|\s|\()\*([^*]+)\*(?=$|\s|[.,!?;)])/g;
-      let italicMatch;
-      while ((italicMatch = italicRegex.exec(text)) !== null) {
-        const [fullMatch, content2] = italicMatch;
-        const matchIndex = italicMatch.index;
-        const starIndex = fullMatch.indexOf("*");
-        if (matchIndex + starIndex > lastIndex) {
-          nodes.push(createTextNode(text.slice(lastIndex, matchIndex + starIndex)));
-        }
-        nodes.push(createTextNode(content2, 2));
-        lastIndex = matchIndex + fullMatch.length;
-      }
-      if (lastIndex < text.length) {
-        nodes.push(createTextNode(text.slice(lastIndex)));
-      }
-      return nodes.length > 0 ? nodes : [createTextNode(text)];
     };
     const rootChildren = [];
     let currentListItems = null;
@@ -754,6 +739,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
         };
       }
       const cleanMarkdown = markdownContent.trim();
+      console.log("Original Markdown content:", cleanMarkdown);
       const lines = cleanMarkdown.split("\n");
       let featuredImage;
       let contentWithoutFirstImage = cleanMarkdown;
@@ -766,6 +752,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
         }
       }
       const lexical = this.parseMarkdownToMobiledoc(contentWithoutFirstImage);
+      console.log("Lexical format:", lexical);
       const postData = {
         posts: [{
           title,
@@ -776,6 +763,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
           published_at: null
         }]
       };
+      console.log("Final post data:", JSON.stringify(postData, null, 2));
       if (featuredImage) {
         postData.posts[0].feature_image = featuredImage;
       }

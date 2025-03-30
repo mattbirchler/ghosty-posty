@@ -16,3 +16,4 @@ node_modules/
 *.swp
 *.swo 
 data.json
+.DS_Store

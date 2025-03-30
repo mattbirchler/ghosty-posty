@@ -169,6 +169,16 @@ export default class GhostyPostyPlugin extends Plugin {
         // Replace Obsidian image links ![[image.png]] with standard markdown ![](image.png)
         return content.replace(/!\[\[(.*?)\]\]/g, '![]($1)');
     }
+
+    formatInlineCode(content: string): string {
+        // Preserve inline code formatting using backticks
+        // This matches single backtick pairs that aren't part of triple backtick blocks
+        // The negative lookbehind/lookahead ensures we don't match inside code blocks
+        return content.replace(/(?<!`)`([^`]+)`(?!`)/g, (match, code) => {
+            // Return the code with backticks preserved - Ghost's lexical format will handle this correctly
+            return match;
+        });
+    }
     
     async processImageLinks(content: string, view: MarkdownView): Promise<string> {
         const imageRegex = /!\[\[(.*?)\]\]/g;
@@ -205,6 +215,9 @@ export default class GhostyPostyPlugin extends Plugin {
             const regex = new RegExp(`!\\[\\[${this.escapeRegExp(imagePath)}\\]\\]`, 'g');
             processedContent = processedContent.replace(regex, `![](${ghostUrl})`);
         }
+        
+        // Format inline code
+        processedContent = this.formatInlineCode(processedContent);
         
         return processedContent;
     }
@@ -369,12 +382,22 @@ export default class GhostyPostyPlugin extends Plugin {
                 };
                 
                 const payload = {
-                    iat: now,
-                    exp: fiveMinutesFromNow,
-                    aud: '/v5/admin/'
+                    iat: now,                  // Issued at time
+                    exp: fiveMinutesFromNow,   // Expiration time
+                    aud: '/v5/admin/'          // Audience
                 };
                 
                 // Base64 encode the header and payload
+                const encodeBase64 = (obj: any) => {
+                    const str = JSON.stringify(obj);
+                    return crypto.createHash('sha256')
+                        .update(str)
+                        .digest('base64')
+                        .replace(/\+/g, '-')
+                        .replace(/\//g, '_')
+                        .replace(/=+$/g, '');
+                };
+                
                 const headerBase64 = Buffer.from(JSON.stringify(header)).toString('base64')
                     .replace(/\+/g, '-')
                     .replace(/\//g, '_')
@@ -627,12 +650,12 @@ export default class GhostyPostyPlugin extends Plugin {
 
         // Helper function to create a text node
         const createTextNode = (text: string, format: number = 0): LexicalNode => ({
-            type: "extended-text",
+            type: "text",
+            text,
             detail: 0,
             format,
             mode: "normal",
             style: "",
-            text,
             version: 1
         });
 
@@ -672,105 +695,60 @@ export default class GhostyPostyPlugin extends Plugin {
         // Helper function to process text with links and formatting
         const processTextWithMarkup = (text: string): LexicalNode[] => {
             const nodes: LexicalNode[] = [];
-            let currentText = text;
-            let lastIndex = 0;
+            let currentIndex = 0;
 
-            // Process links first
-            const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-            let linkMatch;
-            while ((linkMatch = linkRegex.exec(text)) !== null) {
-                const [fullMatch, linkText, url] = linkMatch;
-                const matchIndex = linkMatch.index;
+            // Regular expressions for different markup types
+            const markupRegex = /(?:```[\s\S]*?```)|(?:`[^`]+`)|(?:\[([^\]]+)\]\(([^)]+)\))|(?:\*\*[^*]+\*\*)|(?:__[^_]+__)|(?:\*[^*]+\*)/g;
+            let match;
 
-                // Add text before the link if any
-                if (matchIndex > lastIndex) {
-                    nodes.push(createTextNode(text.slice(lastIndex, matchIndex)));
+            while ((match = markupRegex.exec(text)) !== null) {
+                // Add any text before the match
+                if (match.index > currentIndex) {
+                    nodes.push(createTextNode(text.slice(currentIndex, match.index)));
                 }
 
-                // Add the link node
-                nodes.push({
-                    type: "link",
-                    url,
-                    children: [createTextNode(linkText)],
-                    direction: "ltr",
-                    format: 0,
-                    indent: 0,
-                    version: 1
-                });
+                const matchedText = match[0];
 
-                lastIndex = matchIndex + fullMatch.length;
+                if (matchedText.startsWith('```')) {
+                    // Code block - not handling this here as it should be handled at block level
+                    nodes.push(createTextNode(matchedText));
+                } else if (matchedText.startsWith('`')) {
+                    // Inline code
+                    const code = matchedText.slice(1, -1);
+                    nodes.push(createTextNode(code, 16));
+                } else if (matchedText.startsWith('[')) {
+                    // Link
+                    const linkMatch = /\[([^\]]+)\]\(([^)]+)\)/.exec(matchedText);
+                    if (linkMatch) {
+                        nodes.push({
+                            type: "link",
+                            url: linkMatch[2],
+                            children: [createTextNode(linkMatch[1])],
+                            direction: "ltr",
+                            format: 0,
+                            indent: 0,
+                            version: 1
+                        });
+                    }
+                } else if (matchedText.startsWith('**') || matchedText.startsWith('__')) {
+                    // Bold
+                    const boldText = matchedText.slice(2, -2);
+                    nodes.push(createTextNode(boldText, 1));
+                } else if (matchedText.startsWith('*')) {
+                    // Italic
+                    const italicText = matchedText.slice(1, -1);
+                    nodes.push(createTextNode(italicText, 2));
+                }
+
+                currentIndex = match.index + matchedText.length;
             }
 
-            // Add remaining text
-            if (lastIndex < text.length) {
-                const remainingText = text.slice(lastIndex);
-                
-                // Process bold text first
-                const boldRegex = /\*\*([^*]+)\*\*|__([^_]+)__/g;
-                let boldMatch;
-                let boldLastIndex = 0;
-                
-                while ((boldMatch = boldRegex.exec(remainingText)) !== null) {
-                    const [fullMatch, content] = boldMatch;
-                    const matchIndex = boldMatch.index;
-                    
-                    // Add text before bold
-                    if (matchIndex > boldLastIndex) {
-                        const beforeText = remainingText.slice(boldLastIndex, matchIndex);
-                        // Process italic in text before bold
-                        const italicNodes = processItalicText(beforeText);
-                        nodes.push(...italicNodes);
-                    }
-                    
-                    // Add bold text (format 1 represents bold)
-                    nodes.push(createTextNode(content, 1));
-                    
-                    boldLastIndex = matchIndex + fullMatch.length;
-                }
-                
-                // Process remaining text for italic
-                if (boldLastIndex < remainingText.length) {
-                    const italicText = remainingText.slice(boldLastIndex);
-                    const italicNodes = processItalicText(italicText);
-                    nodes.push(...italicNodes);
-                }
+            // Add any remaining text
+            if (currentIndex < text.length) {
+                nodes.push(createTextNode(text.slice(currentIndex)));
             }
 
             return nodes;
-        };
-
-        // Helper function to process italic text
-        const processItalicText = (text: string): LexicalNode[] => {
-            const nodes: LexicalNode[] = [];
-            let lastIndex = 0;
-            
-            // Match single asterisks for italic, avoiding double asterisks (bold)
-            // and word-internal asterisks by checking boundaries
-            const italicRegex = /(?:^|\s|\()\*([^*]+)\*(?=$|\s|[.,!?;)])/g;
-            let italicMatch;
-            
-            while ((italicMatch = italicRegex.exec(text)) !== null) {
-                const [fullMatch, content] = italicMatch;
-                const matchIndex = italicMatch.index;
-                const starIndex = fullMatch.indexOf('*');
-                
-                // Add text before italic, including any leading space/punctuation
-                if (matchIndex + starIndex > lastIndex) {
-                    nodes.push(createTextNode(text.slice(lastIndex, matchIndex + starIndex)));
-                }
-                
-                // Add italic text (format 2 represents italic)
-                nodes.push(createTextNode(content, 2));
-                
-                lastIndex = matchIndex + fullMatch.length;
-            }
-            
-            // Add any remaining text
-            if (lastIndex < text.length) {
-                nodes.push(createTextNode(text.slice(lastIndex)));
-            }
-            
-            return nodes.length > 0 ? nodes : [createTextNode(text)];
         };
 
         // Process the content
@@ -780,7 +758,7 @@ export default class GhostyPostyPlugin extends Plugin {
 
         // First, split by paragraphs (double newlines)
         const paragraphBlocks = content.split('\n\n').filter(p => p.trim());
-
+        
         paragraphBlocks.forEach(block => {
             // Split each block into lines
             const lines = block.split('\n').filter(line => line.trim());
@@ -932,6 +910,9 @@ export default class GhostyPostyPlugin extends Plugin {
             // Clean up the markdown content
             const cleanMarkdown = markdownContent.trim();
             
+            // Debug logging for markdown content
+            console.log('Original Markdown content:', cleanMarkdown);
+            
             // Check if first line is an image
             const lines = cleanMarkdown.split('\n');
             let featuredImage: string | undefined;
@@ -950,6 +931,9 @@ export default class GhostyPostyPlugin extends Plugin {
             // Parse markdown into Lexical format
             const lexical = this.parseMarkdownToMobiledoc(contentWithoutFirstImage);
             
+            // Debug logging for lexical format
+            console.log('Lexical format:', lexical);
+            
             // Prepare the post data
             const postData: any = {
                 posts: [{
@@ -961,6 +945,9 @@ export default class GhostyPostyPlugin extends Plugin {
                     published_at: null // Initialize to null
                 }]
             };
+            
+            // Debug logging for final post data
+            console.log('Final post data:', JSON.stringify(postData, null, 2));
             
             // Add featured image if found
             if (featuredImage) {
