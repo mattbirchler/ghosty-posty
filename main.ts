@@ -800,8 +800,8 @@ export default class GhostyPostyPlugin extends Plugin {
                     currentListType = null;
                 }
 
-                // Check for horizontal rule
-                if (trimmedLine === '---') {
+                // Check for horizontal rule (three or more dashes)
+                if (trimmedLine.match(/^-{3,}$/)) {
                     rootChildren.push({
                         type: "horizontalrule",
                         version: 1

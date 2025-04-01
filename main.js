@@ -651,7 +651,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
           currentListItems = null;
           currentListType = null;
         }
-        if (trimmedLine === "---") {
+        if (trimmedLine.match(/^-{3,}$/)) {
           rootChildren.push({
             type: "horizontalrule",
             version: 1
