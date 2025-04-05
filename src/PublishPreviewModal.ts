@@ -71,11 +71,11 @@ export class PublishPreviewModal extends Modal {
                         if (newStatus === 'scheduled') {
                             scheduleSetting.settingEl.style.display = 'flex';
                             if (!this.currentOptions.scheduledTime || this.currentOptions.scheduledTime <= new Date()) {
-                                // Set default scheduled time to tomorrow at the same time
-                                const tomorrow = new Date();
-                                tomorrow.setDate(tomorrow.getDate() + 1);
-                                this.currentOptions.scheduledTime = tomorrow;
-                                dateInput.value = this.formatDateForInput(tomorrow);
+                                // Set default scheduled time to 1 hour from now
+                                const oneHourFromNow = new Date();
+                                oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
+                                this.currentOptions.scheduledTime = oneHourFromNow;
+                                dateInput.value = this.formatDateForInput(oneHourFromNow);
                             }
                         } else {
                             scheduleSetting.settingEl.style.display = 'none';
@@ -106,10 +106,10 @@ export class PublishPreviewModal extends Modal {
                 const scheduledDate = new Date(target.value);
                 this.currentOptions.scheduledTime = scheduledDate;
             } else {
-                const tomorrow = new Date();
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                this.currentOptions.scheduledTime = tomorrow;
-                dateInput.value = this.formatDateForInput(tomorrow);
+                const oneHourFromNow = new Date();
+                oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
+                this.currentOptions.scheduledTime = oneHourFromNow;
+                dateInput.value = this.formatDateForInput(oneHourFromNow);
             }
         });
 
