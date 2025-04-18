@@ -7,6 +7,7 @@ export interface PublishOptions {
     featured: boolean;
     visibility: 'public' | 'members' | 'paid';
     scheduledTime: Date | null;
+    title?: string; // Optional title property to pass back the updated title
 }
 
 export class PublishPreviewModal extends Modal {
@@ -168,7 +169,11 @@ export class PublishPreviewModal extends Modal {
             cls: 'modal-button mod-cta'
         });
         publishButton.addEventListener('click', () => {
-            this.onSubmit(this.currentOptions);
+            // Include the updated title in the options
+            this.onSubmit({
+                ...this.currentOptions,
+                title: this.title // Pass the title back to the caller
+            });
             this.close();
         });
     }

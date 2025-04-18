@@ -6,8 +6,8 @@ interface GhostyPostySettings {
     apiKey: string;
     imagesDirectory: string;
     openEditorAfterPublish: boolean;
-    recentPostsFile: string;
-    enableRecentPosts: boolean;
+    moveNotesAfterPublish: boolean;
+    publishedNotesDirectory: string;
 }
 
 interface FrontMatterData {
@@ -24,8 +24,8 @@ const DEFAULT_SETTINGS: GhostyPostySettings = {
     apiKey: '',
     imagesDirectory: 'assets/files',
     openEditorAfterPublish: false,
-    recentPostsFile: 'Recent Ghost Posts.md',
-    enableRecentPosts: false
+    moveNotesAfterPublish: false,
+    publishedNotesDirectory: 'Published Notes'
 }
 
 export default class GhostyPostyPlugin extends Plugin {
@@ -58,26 +58,7 @@ export default class GhostyPostyPlugin extends Plugin {
             }
         });
 
-        // Add a command to manually refresh recent posts
-        this.addCommand({
-            id: 'refresh-recent-posts',
-            name: 'Refresh recent Ghost posts',
-            checkCallback: (checking: boolean) => {
-                if (checking) {
-                    return this.settings.enableRecentPosts && 
-                           !!this.settings.ghostUrl && 
-                           !!this.settings.apiKey;
-                }
-                
-                this.updateRecentPosts();
-                return true;
-            }
-        });
 
-        // Update recent posts on load if enabled
-        if (this.settings.enableRecentPosts) {
-            this.updateRecentPosts();
-        }
     }
     
     parseFrontMatter(content: string): { frontMatter: FrontMatterData, markdownContent: string } {
@@ -121,7 +102,15 @@ export default class GhostyPostyPlugin extends Plugin {
                         frontMatter.title = value;
                         break;
                     case 'status':
-                        frontMatter.status = value === 'post' || value === 'published' ? 'published' : 'draft';
+                        // Handle different status values that might be in the front matter
+                        const statusValue = value.toLowerCase();
+                        if (statusValue === 'post' || statusValue === 'published') {
+                            frontMatter.status = 'published';
+                        } else if (statusValue === 'scheduled') {
+                            frontMatter.status = 'scheduled';
+                        } else {
+                            frontMatter.status = 'draft';
+                        }
                         break;
                     case 'time':
                         frontMatter.time = value;
@@ -516,8 +505,11 @@ export default class GhostyPostyPlugin extends Plugin {
             // Process and upload images
             const processedContent = await this.processImageLinks(markdownContent, view);
             
-            // Use frontmatter title if available, otherwise use filename
-            const title = frontMatter.title || fileName;
+            // Get the most up-to-date file name (in case the file was renamed)
+            const currentFileName = view.file?.basename || 'Untitled Note';
+            
+            // Use frontmatter title if available, otherwise use current filename
+            const title = frontMatter.title || currentFileName;
             
             // Create initial options from frontmatter or defaults
             const initialOptions: PublishOptions = {
@@ -535,12 +527,16 @@ export default class GhostyPostyPlugin extends Plugin {
                 processedContent,
                 initialOptions,
                 async (options: PublishOptions) => {
+                    // Use the updated title from the modal if provided, otherwise use the original title
+                    const finalTitle = options.title || title;
+                    
                     // Call the publish function with the selected options
                     const result = await this.publishToGhost(
-                        title,
+                        finalTitle,
                         processedContent,
                         {
                             ...frontMatter,
+                            title: finalTitle, // Use the updated title in frontMatter too
                             status: options.status,
                             tags: options.tags,
                             featured: options.featured,
@@ -551,7 +547,12 @@ export default class GhostyPostyPlugin extends Plugin {
                     
                     // Show success or error message
                     if (result.success) {
-                        new Notice(`Successfully published "${title}" as ${options.status}`);
+                        new Notice(`Successfully published "${finalTitle}" as ${options.status}`);
+                        
+                        // Move the note to the published directory if the setting is enabled
+                        if (this.settings.moveNotesAfterPublish && view.file) {
+                            await this.moveNoteToPublishedDirectory(view.file);
+                        }
                     } else {
                         new Notice(`Failed to publish: ${result.error}`);
                     }
@@ -1190,109 +1191,61 @@ export default class GhostyPostyPlugin extends Plugin {
     async saveSettings() {
         await this.saveData(this.settings);
     }
-
-    async fetchRecentPosts(): Promise<{ title: string, url: string, published_at: string, tags: string[] }[]> {
+    
+    /**
+     * Move a note to the published notes directory
+     * @param file The file to move
+     * @returns A promise that resolves to true if the move was successful, false otherwise
+     */
+    async moveNoteToPublishedDirectory(file: TFile): Promise<boolean> {
         try {
-            const { ghostUrl, apiKey } = this.settings;
-            
-            if (!ghostUrl || !apiKey) {
-                throw new Error('Ghost URL and API Key are required');
+            if (!this.settings.moveNotesAfterPublish || !file) {
+                return false;
             }
             
-            // Clean up the URL
-            const baseUrl = ghostUrl.trim().replace(/\/$/, '');
+            // Make sure the directory exists
+            const targetDirPath = this.settings.publishedNotesDirectory;
+            let targetDir = this.app.vault.getAbstractFileByPath(targetDirPath);
             
-            // Extract API credentials
-            const [id, secret] = apiKey.split(':');
-            if (!id || !secret) {
-                throw new Error('Invalid API key format');
-            }
-            
-            // Generate auth token
-            const authToken = this.generateGhostAdminToken(id, secret);
-            
-            // Fetch recent posts (increased to 20)
-            const response = await requestUrl({
-                url: `${baseUrl}/ghost/api/admin/posts/?limit=20&order=published_at%20desc&formats=mobiledoc,html,plaintext&include=tags`,
-                method: 'GET',
-                headers: {
-                    'Authorization': authToken
+            // Create the directory if it doesn't exist
+            if (!targetDir) {
+                try {
+                    await this.app.vault.createFolder(targetDirPath);
+                    targetDir = this.app.vault.getAbstractFileByPath(targetDirPath);
+                } catch (error) {
+                    console.error(`Failed to create directory: ${targetDirPath}`, error);
+                    new Notice(`Failed to create directory: ${targetDirPath}`);
+                    return false;
                 }
-            });
-            
-            if (response.status !== 200) {
-                throw new Error(`API Error: ${response.status}`);
             }
             
-            const posts = response.json.posts;
-            return posts.map((post: any) => ({
-                title: post.title,
-                url: post.url,
-                published_at: post.published_at,
-                tags: (post.tags || []).map((tag: any) => tag.name)
-            }));
+            // Check if the target is actually a directory
+            if (!targetDir || targetDir instanceof TFile) {
+                new Notice(`${targetDirPath} is not a directory`);
+                return false;
+            }
+            
+            // Construct the new path for the file
+            const newPath = `${targetDirPath}/${file.name}`;
+            
+            // Check if a file with the same name already exists in the target directory
+            if (this.app.vault.getAbstractFileByPath(newPath)) {
+                new Notice(`A file named ${file.name} already exists in ${targetDirPath}`);
+                return false;
+            }
+            
+            // Move the file
+            await this.app.fileManager.renameFile(file, newPath);
+            new Notice(`Moved ${file.name} to ${targetDirPath}`);
+            return true;
         } catch (error) {
-            console.error('Error fetching recent posts:', error);
-            throw error;
+            console.error('Error moving note to published directory:', error);
+            new Notice(`Error moving note: ${error}`);
+            return false;
         }
     }
 
-    async updateRecentPosts() {
-        try {
-            if (!this.settings.enableRecentPosts) {
-                return;
-            }
 
-            const posts = await this.fetchRecentPosts();
-            
-            // Format date helper function
-            const formatDate = (dateStr: string) => {
-                const date = new Date(dateStr);
-                return date.toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                });
-            };
-            
-            // Create content for the file
-            const content = [
-                '# Recent Ghost Posts',
-                '',
-                'Last updated: ' + new Date().toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                }),
-                '',
-                '| Title | Date | Tags |',
-                '|-------|------|------|',
-                ...posts.map(post => {
-                    const date = formatDate(post.published_at);
-                    const title = `[${post.title}](${post.url})`;
-                    const tags = post.tags.length > 0 ? post.tags.join(', ') : '-';
-                    // Escape any pipe characters in the content
-                    const escapedTitle = title.replace(/\|/g, '\\|');
-                    const escapedTags = tags.replace(/\|/g, '\\|');
-                    return `| ${escapedTitle} | ${date} | ${escapedTags} |`;
-                })
-            ].join('\n');
-
-            // Get or create the file
-            const filePath = this.settings.recentPostsFile;
-            let file = this.app.vault.getAbstractFileByPath(filePath);
-            
-            if (!file) {
-                file = await this.app.vault.create(filePath, content);
-                new Notice(`Created recent posts file: ${filePath}`);
-            } else if (file instanceof TFile) {
-                await this.app.vault.modify(file, content);
-                new Notice('Updated recent posts');
-            }
-        } catch (error) {
-            new Notice(`Error updating recent posts: ${error}`);
-        }
-    }
 }
 
 class GhostyPostySettingTab extends PluginSettingTab {
@@ -1344,6 +1297,8 @@ class GhostyPostySettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        containerEl.createEl('h3', { text: 'Published Notes Management' });
+
         new Setting(containerEl)
             .setName('Open Editor After Publish')
             .setDesc('Whether to open the editor after publishing a post')
@@ -1355,25 +1310,30 @@ class GhostyPostySettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Recent Posts File')
-            .setDesc('The file name for the recent posts file')
-            .addText(text => text
-                .setPlaceholder('Recent Ghost Posts.md')
-                .setValue(this.plugin.settings.recentPostsFile)
+            .setName('Move Notes After Publishing')
+            .setDesc('Move notes to a specified directory after they are published')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.moveNotesAfterPublish)
                 .onChange(async (value) => {
-                    this.plugin.settings.recentPostsFile = value;
+                    this.plugin.settings.moveNotesAfterPublish = value;
+                    await this.plugin.saveSettings();
+                    publishedDirSetting.settingEl.style.display = value ? 'flex' : 'none';
+                }));
+
+        const publishedDirSetting = new Setting(containerEl)
+            .setName('Published Notes Directory')
+            .setDesc('Directory where published notes will be moved to')
+            .addText(text => text
+                .setPlaceholder('Published Notes')
+                .setValue(this.plugin.settings.publishedNotesDirectory)
+                .onChange(async (value) => {
+                    // Remove leading and trailing slashes for consistency
+                    this.plugin.settings.publishedNotesDirectory = value.replace(/^\/*|\/*$/g, '');
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl)
-            .setName('Enable Recent Posts')
-            .setDesc('Whether to enable the recent posts feature')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableRecentPosts)
-                .onChange(async (value) => {
-                    this.plugin.settings.enableRecentPosts = value;
-                    await this.plugin.saveSettings();
-                }));
+        // Initially show/hide the published directory setting based on the toggle value
+        publishedDirSetting.settingEl.style.display = this.plugin.settings.moveNotesAfterPublish ? 'flex' : 'none';
 
         new Setting(containerEl)
             .setName('Test Connection')

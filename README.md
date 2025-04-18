@@ -11,6 +11,7 @@ An Obsidian plugin for publishing notes to Ghost blogs.
 - Tags
 - Featured posts
 - Upload images (including header images)
+- Automatically move published notes to a specified directory
 
 ## Installation
 
@@ -37,6 +38,16 @@ Currently tested on macOS, Windows, and iOS.
 3. Search for "Publish current note as a draft" or "Ghosty Posty"
 4. Confirm the details on the preview pop up
 5. Post to your site
+
+### Moving Published Notes
+
+You can configure the plugin to automatically move your notes to a specified directory after they've been published:
+
+1. Go to the Ghosty Posty settings in Obsidian
+2. Enable "Move Notes After Publishing"
+3. Specify the directory where you want published notes to be moved (default is "Published Notes")
+
+When this feature is enabled, any note you publish to Ghost will be automatically moved to the specified directory. This helps you create an "archive" of published notes.
 
 ## Properties
 

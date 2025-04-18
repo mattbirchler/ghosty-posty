@@ -17,3 +17,4 @@ node_modules/
 *.swo 
 data.json
 .DS_Store
+.DS_Store
