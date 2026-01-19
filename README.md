@@ -1,5 +1,7 @@
 # Ghosty Posty
 
+> **⚠️ DEPRECATED:** This project is no longer maintained. Please use [ghosty-posty-obsidian](https://github.com/mattbirchler/ghosty-posty-obsidian) instead, which has a better version of this plugin and will be maintained going forward.
+
 An Obsidian plugin for publishing notes to Ghost blogs.
 
 ## Features
