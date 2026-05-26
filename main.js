@@ -40,7 +40,7 @@ var PublishPreviewModal = class extends import_obsidian.Modal {
     this.onSubmit = onSubmit;
     this.currentOptions = {
       ...initialOptions,
-      scheduledTime: initialOptions.scheduledTime || new Date()
+      scheduledTime: initialOptions.scheduledTime || /* @__PURE__ */ new Date()
     };
     this.previewComponent = new import_obsidian.Component();
   }
@@ -58,15 +58,15 @@ var PublishPreviewModal = class extends import_obsidian.Modal {
         this.currentOptions.status = newStatus;
         if (newStatus === "scheduled") {
           scheduleSetting.settingEl.style.display = "flex";
-          if (!this.currentOptions.scheduledTime || this.currentOptions.scheduledTime <= new Date()) {
-            const oneHourFromNow = new Date();
+          if (!this.currentOptions.scheduledTime || this.currentOptions.scheduledTime <= /* @__PURE__ */ new Date()) {
+            const oneHourFromNow = /* @__PURE__ */ new Date();
             oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
             this.currentOptions.scheduledTime = oneHourFromNow;
             dateInput.value = this.formatDateForInput(oneHourFromNow);
           }
         } else {
           scheduleSetting.settingEl.style.display = "none";
-          this.currentOptions.scheduledTime = new Date();
+          this.currentOptions.scheduledTime = /* @__PURE__ */ new Date();
         }
       });
     });
@@ -85,7 +85,7 @@ var PublishPreviewModal = class extends import_obsidian.Modal {
         const scheduledDate = new Date(target.value);
         this.currentOptions.scheduledTime = scheduledDate;
       } else {
-        const oneHourFromNow = new Date();
+        const oneHourFromNow = /* @__PURE__ */ new Date();
         oneHourFromNow.setHours(oneHourFromNow.getHours() + 1);
         this.currentOptions.scheduledTime = oneHourFromNow;
         dateInput.value = this.formatDateForInput(oneHourFromNow);
@@ -118,12 +118,13 @@ var PublishPreviewModal = class extends import_obsidian.Modal {
       this.onSubmit({
         ...this.currentOptions,
         title: this.title
+        // Pass the title back to the caller
       });
       this.close();
     });
   }
   formatDateForInput(date) {
-    const inputDate = date || new Date();
+    const inputDate = date || /* @__PURE__ */ new Date();
     const year = inputDate.getFullYear();
     const month = String(inputDate.getMonth() + 1).padStart(2, "0");
     const day = String(inputDate.getDate()).padStart(2, "0");
@@ -186,8 +187,7 @@ var GhostyPostyPlugin = class extends import_obsidian2.Plugin {
     const lines = frontMatterText.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
-      if (!line)
-        continue;
+      if (!line) continue;
       if (line.includes(":")) {
         const [key, value] = line.split(":", 2).map((s) => s.trim());
         switch (key.toLowerCase()) {
@@ -221,15 +221,13 @@ var GhostyPostyPlugin = class extends import_obsidian2.Plugin {
             if (value) {
               value.split(",").forEach((tag) => {
                 const trimmedTag = tag.trim();
-                if (trimmedTag)
-                  tagList.push(trimmedTag);
+                if (trimmedTag) tagList.push(trimmedTag);
               });
             } else {
               let j = i + 1;
               while (j < lines.length && lines[j].trim().startsWith("-")) {
                 const tag = lines[j].trim().substring(1).trim();
-                if (tag)
-                  tagList.push(tag);
+                if (tag) tagList.push(tag);
                 j++;
               }
             }
@@ -282,7 +280,10 @@ var GhostyPostyPlugin = class extends import_obsidian2.Plugin {
   }
   async uploadImageToGhost(imagePath, view) {
     try {
-      const file = this.app.vault.getAbstractFileByPath(this.resolveImagePath(imagePath, view));
+      const file = this.app.vault.getAbstractFileByPath(
+        // If path is relative, resolve it relative to the current note
+        this.resolveImagePath(imagePath, view)
+      );
       if (!file || !(file instanceof import_obsidian2.TFile)) {
         new import_obsidian2.Notice(`Image not found: ${imagePath}`);
         return null;
@@ -338,7 +339,9 @@ Content-Type: ${this.getMimeType(fileName)}\r
 `;
       const headerBuffer = new TextEncoder().encode(fileHeader);
       const footerBuffer = new TextEncoder().encode(fileFooter);
-      const combinedBuffer = new Uint8Array(headerBuffer.byteLength + fileData.byteLength + footerBuffer.byteLength);
+      const combinedBuffer = new Uint8Array(
+        headerBuffer.byteLength + fileData.byteLength + footerBuffer.byteLength
+      );
       combinedBuffer.set(new Uint8Array(headerBuffer), 0);
       combinedBuffer.set(new Uint8Array(fileData), headerBuffer.byteLength);
       combinedBuffer.set(new Uint8Array(footerBuffer), headerBuffer.byteLength + fileData.byteLength);
@@ -385,11 +388,15 @@ Content-Type: ${this.getMimeType(fileName)}\r
           alg: "HS256",
           typ: "JWT",
           kid: id
+          // Key ID
         };
         const payload = {
           iat: now,
+          // Issued at time
           exp: fiveMinutesFromNow,
+          // Expiration time
           aud: "/v5/admin/"
+          // Audience
         };
         const encodeBase64 = (obj) => {
           const str = JSON.stringify(obj);
@@ -486,32 +493,44 @@ Content-Type: ${this.getMimeType(fileName)}\r
         tags: frontMatter.tags || [],
         featured: frontMatter.featured || false,
         visibility: frontMatter.visibility || "public",
-        scheduledTime: frontMatter.time ? new Date(frontMatter.time) : new Date()
+        scheduledTime: frontMatter.time ? new Date(frontMatter.time) : /* @__PURE__ */ new Date()
       };
-      new PublishPreviewModal(this.app, title, processedContent, initialOptions, async (options) => {
-        const finalTitle = options.title || title;
-        const result = await this.publishToGhost(finalTitle, processedContent, {
-          ...frontMatter,
-          title: finalTitle,
-          status: options.status,
-          tags: options.tags,
-          featured: options.featured,
-          visibility: options.visibility,
-          time: options.scheduledTime ? options.scheduledTime.toISOString() : void 0
-        });
-        if (result.success) {
-          new import_obsidian2.Notice(`Successfully published "${finalTitle}" as ${options.status}`);
-          if (this.settings.moveNotesAfterPublish && view.file) {
-            await this.moveNoteToPublishedDirectory(view.file);
+      new PublishPreviewModal(
+        this.app,
+        title,
+        processedContent,
+        initialOptions,
+        async (options) => {
+          const finalTitle = options.title || title;
+          const result = await this.publishToGhost(
+            finalTitle,
+            processedContent,
+            {
+              ...frontMatter,
+              title: finalTitle,
+              // Use the updated title in frontMatter too
+              status: options.status,
+              tags: options.tags,
+              featured: options.featured,
+              visibility: options.visibility,
+              time: options.scheduledTime ? options.scheduledTime.toISOString() : void 0
+            }
+          );
+          if (result.success) {
+            new import_obsidian2.Notice(`Successfully published "${finalTitle}" as ${options.status}`);
+            if (this.settings.moveNotesAfterPublish && view.file) {
+              await this.moveNoteToPublishedDirectory(view.file);
+            }
+          } else {
+            new import_obsidian2.Notice(`Failed to publish: ${result.error}`);
           }
-        } else {
-          new import_obsidian2.Notice(`Failed to publish: ${result.error}`);
         }
-      }).open();
+      ).open();
     } catch (error) {
       new import_obsidian2.Notice(`Error publishing note: ${error}`);
     }
   }
+  // Helper function to generate a proper Ghost Admin API token
   generateGhostAdminToken(id, secret) {
     try {
       const crypto = window.require ? window.require("crypto") : null;
@@ -524,11 +543,15 @@ Content-Type: ${this.getMimeType(fileName)}\r
         alg: "HS256",
         typ: "JWT",
         kid: id
+        // Key ID
       };
       const payload = {
         iat: now,
+        // Issued at time
         exp: fiveMinutesFromNow,
+        // Expiration time
         aud: "/v5/admin/"
+        // Audience
       };
       const encodeBase64 = (obj) => {
         const str = JSON.stringify(obj);
@@ -763,6 +786,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
           featured: frontMatter.featured || false,
           visibility: frontMatter.visibility || "public",
           published_at: null
+          // Initialize to null
         }]
       };
       console.log("Final post data:", JSON.stringify(postData, null, 2));
@@ -775,7 +799,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
       if (frontMatter.status === "scheduled" && frontMatter.time) {
         postData.posts[0].published_at = frontMatter.time;
       } else if (frontMatter.status === "published") {
-        postData.posts[0].published_at = new Date().toISOString();
+        postData.posts[0].published_at = (/* @__PURE__ */ new Date()).toISOString();
       }
       try {
         const authToken = this.generateGhostAdminToken(id, secret);
@@ -850,11 +874,15 @@ Content-Type: ${this.getMimeType(fileName)}\r
           alg: "HS256",
           typ: "JWT",
           kid: id
+          // Key ID
         };
         const payload = {
           iat: now,
+          // Issued at time
           exp: fiveMinutesFromNow,
+          // Expiration time
           aud: "/v5/admin/"
+          // Audience
         };
         const headerBase64 = Buffer.from(JSON.stringify(header)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
         const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
@@ -901,6 +929,7 @@ Content-Type: ${this.getMimeType(fileName)}\r
                 console.error("Error parsing JSON from publish response:", e);
                 resolve({
                   success: true,
+                  // Still consider it a success if status code is good
                   error: `Could not parse response data: ${e}`
                 });
               }
@@ -941,6 +970,11 @@ Content-Type: ${this.getMimeType(fileName)}\r
   async saveSettings() {
     await this.saveData(this.settings);
   }
+  /**
+   * Move a note to the published notes directory
+   * @param file The file to move
+   * @returns A promise that resolves to true if the move was successful, false otherwise
+   */
   async moveNoteToPublishedDirectory(file) {
     try {
       if (!this.settings.moveNotesAfterPublish || !file) {
@@ -1055,9 +1089,13 @@ var GhostyPostySettingTab = class extends import_obsidian2.PluginSettingTab {
         };
       }
       const possibleEndpoints = [
+        // Posts endpoint is very likely to exist and should work for testing auth
         `/ghost/api/admin/posts/`,
+        // Settings endpoint also commonly works
         `/ghost/api/admin/settings/`,
+        // Users endpoint for current user
         `/ghost/api/admin/users/me/`,
+        // Site endpoint (previously tried)
         `/ghost/api/admin/site/`
       ];
       for (const endpoint of possibleEndpoints) {
